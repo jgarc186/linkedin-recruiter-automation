@@ -1,0 +1,23 @@
+{
+  "name": "@linkedin-plugin/extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@vitest/coverage-v8": "^1.6.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.13",
+    "vitest": "^1.6.0",
+    "jsdom": "^24.1.0",
+    "@vitest/ui": "^1.6.0"
+  },
+  "dependencies": {
+    "@linkedin-plugin/shared": "*"
+  }
+}

@@ -1,0 +1,483 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import Fastify from 'fastify';
+import { webhookRoutes } from '../src/routes/webhook.js';
+
+// Mock config
+vi.mock('../src/config.js', () => ({
+  config: {
+    port: 8000,
+    host: '127.0.0.1',
+    telegramBotToken: 'test-token',
+    telegramUserId: '123456789',
+    apiKey: 'test-api-key',
+    databasePath: ':memory:',
+    googleClientId: 'test-client-id',
+    googleClientSecret: 'test-client-secret',
+    googleRefreshToken: 'test-refresh-token',
+  },
+  validateConfig: vi.fn(),
+}));
+
+// Mock TelegramBot
+vi.mock('node-telegram-bot-api', () => {
+  return {
+    default: vi.fn().mockImplementation(() => ({
+      sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+      answerCallbackQuery: vi.fn().mockResolvedValue(true),
+      editMessageText: vi.fn().mockResolvedValue({ message_id: 1 }),
+    })),
+  };
+});
+
+// Mock telegram service to control behavior
+vi.mock('../src/services/telegram.js', () => ({
+  sendApprovalRequest: vi.fn().mockResolvedValue(undefined),
+  handleCallbackQuery: vi.fn().mockResolvedValue({
+    message_id: 'msg_123',
+    action: 'lets_talk',
+  }),
+}));
+
+// Mock calendar service
+vi.mock('../src/services/calendar.js', () => ({
+  generateTimeSlots: vi.fn().mockReturnValue([
+    '2026-03-30T14:00:00.000Z',
+    '2026-03-30T18:00:00.000Z',
+    '2026-03-30T20:00:00.000Z',
+  ]),
+  scheduleMeeting: vi.fn().mockResolvedValue({
+    id: 'event_123',
+    summary: 'Interview with Recruiter from Company',
+    start: { dateTime: '2026-03-30T14:00:00.000Z', timeZone: 'America/New_York' },
+    end: { dateTime: '2026-03-30T15:00:00.000Z', timeZone: 'America/New_York' },
+  }),
+}));
+
+// Mock database
+vi.mock('../src/db/database.js', () => ({
+  initDatabase: vi.fn().mockReturnValue({
+    prepare: vi.fn().mockReturnValue({ run: vi.fn(), get: vi.fn() }),
+    exec: vi.fn(),
+  }),
+  saveMessage: vi.fn(),
+  getMessage: vi.fn().mockReturnValue(null),
+  updateMessageStatus: vi.fn(),
+}));
+
+import { sendApprovalRequest, handleCallbackQuery } from '../src/services/telegram.js';
+import { generateTimeSlots, scheduleMeeting } from '../src/services/calendar.js';
+import { getMessage } from '../src/db/database.js';
+
+describe('webhook routes', () => {
+  let app: ReturnType<typeof Fastify>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    app = Fastify();
+    await app.register(webhookRoutes);
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  describe('API key validation hook', () => {
+    it('should skip auth for /health', async () => {
+      app.get('/health', async () => ({ status: 'ok' }));
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('should skip auth for /webhook/telegram/callback', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: '{"message_id":"msg_123","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('should reject requests with wrong API key', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123', thread_id: 'thread_456', sender: { name: 'Test', title: 'Test', company: 'Test' } },
+        headers: { 'X-API-Key': 'wrong-key' },
+      });
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('should reject requests with no API key', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123', thread_id: 'thread_456', sender: { name: 'Test', title: 'Test', company: 'Test' } },
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  describe('POST /webhook/message', () => {
+    const validMessage = {
+      message_id: 'msg_123',
+      thread_id: 'thread_456',
+      sender: {
+        name: 'Jane Smith',
+        title: 'Senior Technical Recruiter',
+        company: 'TechCorp',
+      },
+      content: 'I have an opportunity for you',
+      timestamp: '2026-03-26T17:00:00Z',
+    };
+
+    it('should accept valid webhook payload', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: validMessage,
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.success).toBe(true);
+      expect(body.message_id).toBe('msg_123');
+      expect(body.status).toBe('approval_requested');
+    });
+
+    it('should reject missing required fields - no sender', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123', thread_id: 'thread_456' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject missing required fields - no thread_id', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject missing required fields - no message_id', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: {},
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should return 500 when sendApprovalRequest throws', async () => {
+      vi.mocked(sendApprovalRequest).mockRejectedValueOnce(new Error('Telegram API error'));
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: validMessage,
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.payload)).toEqual({ error: 'Internal server error' });
+    });
+  });
+
+  describe('POST /webhook/reply', () => {
+    const validReply = {
+      message_id: 'msg_123',
+      thread_id: 'thread_456',
+      user_choice: 'lets_talk',
+      drafted_reply: 'Hi, I would love to chat!',
+    };
+
+    it('should accept valid reply payload', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/reply',
+        payload: validReply,
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.success).toBe(true);
+      expect(body.message_id).toBe('msg_123');
+      expect(body.status).toBe('reply_delivered');
+    });
+
+    it('should reject missing message_id', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/reply',
+        payload: { drafted_reply: 'Hello' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(JSON.parse(response.payload)).toEqual({ error: 'Missing required fields' });
+    });
+
+    it('should reject missing drafted_reply', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/reply',
+        payload: { message_id: 'msg_123' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe('POST /webhook/telegram/callback', () => {
+    it('should handle valid callback query', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: '{"message_id":"msg_123","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.success).toBe(true);
+      expect(body.message_id).toBe('msg_123');
+      expect(body.user_choice).toBe('lets_talk');
+    });
+
+    it('should include thread_id in response', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: '{"message_id":"msg_123","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+      });
+
+      const body = JSON.parse(response.payload);
+      expect(body.thread_id).toBeDefined();
+    });
+
+    it('should reject missing callback_query', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {},
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(JSON.parse(response.payload)).toEqual({ error: 'Missing callback_query' });
+    });
+
+    it('should return 500 when handleCallbackQuery throws', async () => {
+      vi.mocked(handleCallbackQuery).mockRejectedValueOnce(new Error('Invalid data'));
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: 'bad data',
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.payload)).toEqual({ error: 'Internal server error' });
+    });
+
+    it('should generate time slots and schedule meeting for lets_talk action', async () => {
+      vi.mocked(handleCallbackQuery).mockResolvedValueOnce({
+        message_id: 'msg_456',
+        action: 'lets_talk',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_456',
+            data: '{"message_id":"msg_456","action":"lets_talk"}',
+            message: { chat: { id: 123, first_name: 'Jane' }, message_id: 999 },
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.suggested_times).toBeDefined();
+      expect(body.suggested_times).toHaveLength(3);
+      expect(vi.mocked(generateTimeSlots)).toHaveBeenCalled();
+      expect(vi.mocked(scheduleMeeting)).toHaveBeenCalled();
+    });
+
+    it('should not generate time slots for non-lets_talk actions', async () => {
+      vi.mocked(handleCallbackQuery).mockResolvedValueOnce({
+        message_id: 'msg_789',
+        action: 'not_interested',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_789',
+            data: '{"message_id":"msg_789","action":"not_interested"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.suggested_times).toBeUndefined();
+      expect(vi.mocked(generateTimeSlots)).not.toHaveBeenCalled();
+      expect(vi.mocked(scheduleMeeting)).not.toHaveBeenCalled();
+    });
+
+    it('should still succeed if calendar scheduling fails', async () => {
+      vi.mocked(handleCallbackQuery).mockResolvedValueOnce({
+        message_id: 'msg_fail',
+        action: 'lets_talk',
+      });
+      vi.mocked(scheduleMeeting).mockRejectedValueOnce(new Error('Calendar API error'));
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_fail',
+            data: '{"message_id":"msg_fail","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      // Should still succeed - calendar failure is non-fatal
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.success).toBe(true);
+      expect(body.suggested_times).toBeDefined();
+    });
+
+    it('should include drafted_reply in response for lets_talk', async () => {
+      vi.mocked(handleCallbackQuery).mockResolvedValueOnce({
+        message_id: 'msg_draft',
+        action: 'lets_talk',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_draft',
+            data: '{"message_id":"msg_draft","action":"lets_talk"}',
+            message: { chat: { id: 123, first_name: 'Recruiter' }, message_id: 999 },
+          },
+        },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      const body = JSON.parse(response.payload);
+      expect(body.drafted_reply).toBeDefined();
+      expect(typeof body.drafted_reply).toBe('string');
+      expect(body.drafted_reply.length).toBeGreaterThan(0);
+    });
+
+    it('should use stored message data from database when available', async () => {
+      vi.mocked(getMessage).mockReturnValueOnce({
+        id: 'msg_stored',
+        thread_id: 'thread_stored',
+        sender_name: 'Real Recruiter',
+        sender_title: 'Director of Engineering',
+        sender_company: 'RealCorp',
+        content: 'Real message content',
+        timestamp: '2026-03-26T17:00:00Z',
+        is_match: 1,
+        confidence: 0.9,
+        suggested_reply_type: 'lets_talk',
+        status: 'pending',
+        created_at: '2026-03-26T17:00:00Z',
+      });
+
+      vi.mocked(handleCallbackQuery).mockResolvedValueOnce({
+        message_id: 'msg_stored',
+        action: 'lets_talk',
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_stored',
+            data: '{"message_id":"msg_stored","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+      });
+
+      const body = JSON.parse(response.payload);
+      expect(body.thread_id).toBe('thread_stored');
+      expect(body.drafted_reply).toContain('RealCorp');
+    });
+  });
+});
+
+describe('server.ts - createApp & start', () => {
+  it('should export createApp function', async () => {
+    const { createApp } = await import('../src/server.js');
+    expect(typeof createApp).toBe('function');
+  });
+
+  it('should create an app with health endpoint', async () => {
+    const { createApp } = await import('../src/server.js');
+    const app = await createApp();
+    const response = await app.inject({ method: 'GET', url: '/health' });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.payload)).toEqual({ status: 'ok' });
+    await app.close();
+  });
+
+  it('should export start function', async () => {
+    const { start } = await import('../src/server.js');
+    expect(typeof start).toBe('function');
+  });
+});

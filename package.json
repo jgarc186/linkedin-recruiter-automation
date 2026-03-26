@@ -1,0 +1,18 @@
+{
+  "name": "linkedin-chrome-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "extension",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "test:coverage": "npm run test:coverage --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0"
+  }
+}

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinkedIn Recruiter Plugin</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <h1 class="popup-title">LinkedIn Recruiter Plugin</h1>
+
+    <div class="status-row">
+      <span class="label">Backend:</span>
+      <span id="status-indicator" class="status-dot"></span>
+      <span id="connection-status" class="status-text">Checking...</span>
+    </div>
+
+    <div class="status-row">
+      <span class="label">Pending Replies:</span>
+      <span id="pending-count" class="badge">0</span>
+    </div>
+
+    <div class="actions">
+      <a href="options.html" target="_blank" class="btn">Settings</a>
+    </div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

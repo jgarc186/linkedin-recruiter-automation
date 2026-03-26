@@ -1,0 +1,32 @@
+{
+  "name": "linkedin-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@googleapis/calendar": "^9.7.0",
+    "better-sqlite3": "^9.6.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "google-auth-library": "^9.11.0",
+    "googleapis": "^140.0.0",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
+    "@types/node": "^20.14.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "@vitest/coverage-v8": "^1.6.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

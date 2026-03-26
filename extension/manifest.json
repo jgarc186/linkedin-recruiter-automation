@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Recruiter Plugin",
+  "version": "1.0.0",
+  "description": "Automates recruiter message handling on LinkedIn with Telegram approval workflow",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/messaging/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/messaging/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

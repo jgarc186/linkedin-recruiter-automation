@@ -1,0 +1,6 @@
+{
+  "name": "@linkedin-plugin/shared",
+  "version": "1.0.0",
+  "main": "types.ts",
+  "types": "types.ts"
+}
