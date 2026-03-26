@@ -1,11 +1,10 @@
 import crypto from 'node:crypto';
 import { FastifyPluginAsync } from 'fastify';
-import TelegramBot from 'node-telegram-bot-api';
 import { config } from '../config.js';
 import { sendApprovalRequest, handleCallbackQuery } from '../services/telegram.js';
 import { analyzeRole, draftReply } from '../services/analyzer.js';
 import { scheduleMeeting, generateTimeSlots } from '../services/calendar.js';
-import { initDatabase, saveMessage, getMessage, updateMessageStatus } from '../db/database.js';
+import { initDatabase, saveMessage, getMessage, updateMessageStatus, savePendingReply, getPendingReplies } from '../db/database.js';
 import type { MessageData, WebhookMessagePayload, WebhookReplyPayload, TelegramCallbackData } from '../../../shared/types.js';
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -21,8 +20,52 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 const UNAUTHENTICATED_PATHS = ['/health', '/webhook/telegram/callback'];
 
+const messageSchema = {
+  body: {
+    type: 'object',
+    required: ['message_id', 'thread_id', 'sender', 'content', 'timestamp'],
+    properties: {
+      message_id: { type: 'string' },
+      thread_id: { type: 'string' },
+      sender: {
+        type: 'object',
+        required: ['name', 'title', 'company'],
+        properties: {
+          name: { type: 'string' },
+          title: { type: 'string' },
+          company: { type: 'string' },
+        },
+      },
+      content: { type: 'string' },
+      timestamp: { type: 'string' },
+    },
+  },
+};
+
+const replySchema = {
+  body: {
+    type: 'object',
+    required: ['message_id', 'drafted_reply'],
+    properties: {
+      message_id: { type: 'string' },
+      thread_id: { type: 'string' },
+      user_choice: { type: 'string' },
+      drafted_reply: { type: 'string' },
+    },
+  },
+};
+
+const callbackSchema = {
+  body: {
+    type: 'object',
+    required: ['callback_query'],
+    properties: {
+      callback_query: { type: 'object' },
+    },
+  },
+};
+
 const webhookRoutes: FastifyPluginAsync = async (fastify) => {
-  const bot = new TelegramBot(config.telegramBotToken, { polling: false });
   const db = initDatabase(config.databasePath);
 
   // API key validation hook
@@ -36,14 +79,9 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Receive messages from extension
-  fastify.post('/webhook/message', async (request, reply) => {
+  fastify.post('/webhook/message', { schema: messageSchema }, async (request, reply) => {
     try {
       const messageData = request.body as WebhookMessagePayload;
-
-      // Validate required fields
-      if (!messageData.message_id || !messageData.thread_id || !messageData.sender) {
-        return reply.status(400).send({ error: 'Missing required fields' });
-      }
 
       // Analyze the message
       const analysis = analyzeRole(messageData);
@@ -66,14 +104,9 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Receive reply confirmations from extension
-  fastify.post('/webhook/reply', async (request, reply) => {
+  fastify.post('/webhook/reply', { schema: replySchema }, async (request, reply) => {
     try {
       const replyData = request.body as WebhookReplyPayload;
-
-      // Validate
-      if (!replyData.message_id || !replyData.drafted_reply) {
-        return reply.status(400).send({ error: 'Missing required fields' });
-      }
 
       // Update message status in database
       updateMessageStatus(db, replyData.message_id, 'replied');
@@ -90,13 +123,15 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Receive Telegram callback queries
-  fastify.post('/webhook/telegram/callback', async (request, reply) => {
+  fastify.post('/webhook/telegram/callback', { schema: callbackSchema }, async (request, reply) => {
     try {
-      const { callback_query } = request.body as { callback_query: TelegramBot.CallbackQuery };
-
-      if (!callback_query) {
-        return reply.status(400).send({ error: 'Missing callback_query' });
+      // Validate Telegram webhook secret token
+      const secretToken = (request.headers['x-telegram-bot-api-secret-token'] as string) || '';
+      if (!timingSafeEqual(secretToken, config.telegramWebhookSecret)) {
+        return reply.status(401).send({ error: 'Invalid webhook secret' });
       }
+
+      const { callback_query } = request.body as { callback_query: any };
 
       const result = await handleCallbackQuery(callback_query);
 
@@ -153,10 +188,24 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
         suggested_times: suggestedTimes,
       };
 
+      // Persist reply for polling by the extension
+      savePendingReply(db, webhookResponse);
+
       reply.send({
         success: true,
         ...webhookResponse,
       });
+    } catch (error) {
+      fastify.log.error(error);
+      reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  // Poll for pending replies (called by extension)
+  fastify.get('/webhook/pending-replies', async (request, reply) => {
+    try {
+      const replies = getPendingReplies(db);
+      reply.send({ replies });
     } catch (error) {
       fastify.log.error(error);
       reply.status(500).send({ error: 'Internal server error' });

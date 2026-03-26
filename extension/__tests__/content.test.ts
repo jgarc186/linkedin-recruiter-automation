@@ -4,6 +4,7 @@ import {
   isRecruiterMessage,
   extractMessageData,
   resetProcessedMessages,
+  initContentScript,
   RECRUITER_KEYWORDS,
 } from '../src/content';
 import type { MessageData } from '../../shared/types';
@@ -226,6 +227,117 @@ describe('content.ts', () => {
           }),
         })
       );
+    });
+
+    it('should cap processedMessages Set at ~500 after exceeding 1000', () => {
+      document.body.innerHTML = '<div id="msg-conversations-container"></div>';
+      const container = document.getElementById('msg-conversations-container')!;
+
+      // Add 1010 message groups with recruiter content
+      for (let i = 0; i < 1010; i++) {
+        const group = document.createElement('div');
+        group.className = 'msg-s-message-group';
+        group.setAttribute('data-thread-id', `thread_${i}`);
+        group.innerHTML = '<div class="msg-s-event-listitem__body"><p>I have an opportunity for you</p></div>';
+        container.appendChild(group);
+      }
+
+      detectNewMessages();
+
+      // After processing 1010 messages, the set should have been pruned
+      // We can verify by trying to re-detect early messages (they should be "new" again)
+      // Reset DOM and add back early threads
+      container.innerHTML = '';
+      const earlyGroup = document.createElement('div');
+      earlyGroup.className = 'msg-s-message-group';
+      earlyGroup.setAttribute('data-thread-id', 'thread_0');
+      earlyGroup.innerHTML = '<div class="msg-s-event-listitem__body"><p>I have an opportunity for you</p></div>';
+      container.appendChild(earlyGroup);
+
+      const messages = detectNewMessages();
+      // thread_0 should have been pruned and can be re-detected
+      expect(messages).toHaveLength(1);
+      expect(messages[0].thread_id).toBe('thread_0');
+    });
+  });
+
+  describe('initContentScript', () => {
+    it('should call detectNewMessages on init', () => {
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_init">
+            <div class="msg-s-event-listitem__body">
+              <p>I have an opportunity for you</p>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Mock MutationObserver
+      const mockObserve = vi.fn();
+      (global as any).MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: mockObserve,
+        disconnect: vi.fn(),
+      }));
+
+      // Mock chrome.runtime.onMessage
+      (global as any).chrome = {
+        ...((global as any).chrome),
+        runtime: {
+          sendMessage: vi.fn().mockResolvedValue(undefined),
+          onMessage: { addListener: vi.fn() },
+        },
+      };
+
+      initContentScript();
+
+      // Should have sent the detected message to background
+      expect((global as any).chrome.runtime.sendMessage).toHaveBeenCalled();
+    });
+
+    it('should set up MutationObserver', () => {
+      document.body.innerHTML = '<div id="msg-conversations-container"></div>';
+
+      const mockObserve = vi.fn();
+      (global as any).MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: mockObserve,
+        disconnect: vi.fn(),
+      }));
+
+      (global as any).chrome = {
+        ...((global as any).chrome),
+        runtime: {
+          sendMessage: vi.fn().mockResolvedValue(undefined),
+          onMessage: { addListener: vi.fn() },
+        },
+      };
+
+      initContentScript();
+
+      expect(mockObserve).toHaveBeenCalled();
+    });
+
+    it('should register chrome.runtime.onMessage listener', () => {
+      document.body.innerHTML = '<div id="msg-conversations-container"></div>';
+
+      const mockObserve = vi.fn();
+      (global as any).MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: mockObserve,
+        disconnect: vi.fn(),
+      }));
+
+      const mockAddListener = vi.fn();
+      (global as any).chrome = {
+        ...((global as any).chrome),
+        runtime: {
+          sendMessage: vi.fn().mockResolvedValue(undefined),
+          onMessage: { addListener: mockAddListener },
+        },
+      };
+
+      initContentScript();
+
+      expect(mockAddListener).toHaveBeenCalled();
     });
   });
 });

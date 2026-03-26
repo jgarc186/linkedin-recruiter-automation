@@ -119,7 +119,7 @@ describe('popup.ts', () => {
         storage: {
           local: {
             get: vi.fn().mockResolvedValueOnce({
-              webhookUrl: 'http://localhost:8000',
+              settings: { webhookUrl: 'http://localhost:8000' },
             }).mockResolvedValueOnce({
               reply_thread_1: { draftedReply: 'Hi' },
             }),

@@ -1,5 +1,6 @@
 import type { MessageData } from '../../shared/types';
 
+// Base recruiter keywords — shared with backend via shared/constants.ts
 export const RECRUITER_KEYWORDS = [
   'opportunity',
   'role',
@@ -13,10 +14,24 @@ export const RECRUITER_KEYWORDS = [
   'opening',
 ];
 
+const MAX_PROCESSED_SIZE = 1000;
+const PRUNE_TO_SIZE = 500;
+
 const processedMessages = new Set<string>();
 
 export function resetProcessedMessages(): void {
   processedMessages.clear();
+}
+
+function pruneProcessedMessages(): void {
+  if (processedMessages.size <= MAX_PROCESSED_SIZE) return;
+
+  const entries = Array.from(processedMessages);
+  const toKeep = entries.slice(entries.length - PRUNE_TO_SIZE);
+  processedMessages.clear();
+  for (const entry of toKeep) {
+    processedMessages.add(entry);
+  }
 }
 
 export function isRecruiterMessage(text: string): boolean {
@@ -87,6 +102,8 @@ export function detectNewMessages(): MessageData[] {
     }
   });
 
+  pruneProcessedMessages();
+
   return newMessages;
 }
 
@@ -145,8 +162,10 @@ export function sendReply(threadId: string, text: string): void {
 
   if (!input) return;
 
-  input.textContent = text;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  // Use execCommand for React-controlled contenteditable compatibility
+  input.focus();
+  document.execCommand('selectAll', false);
+  document.execCommand('insertText', false, text);
 }
 
 export interface ReplyMessage {
@@ -161,4 +180,29 @@ export function handleReplyMessage(message: ReplyMessage): void {
   if (!message.draftedReply) return;
 
   injectReplyButton(message.threadId, message.draftedReply);
+}
+
+let observer: MutationObserver | null = null;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function initContentScript(): void {
+  // Initial scan
+  detectNewMessages();
+
+  // Set up MutationObserver for dynamic message detection
+  const container = document.getElementById('msg-conversations-container') || document.body;
+
+  observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      detectNewMessages();
+    }, 500);
+  });
+
+  observer.observe(container, { childList: true, subtree: true });
+
+  // Listen for reply messages from background script
+  chrome.runtime?.onMessage?.addListener((message: ReplyMessage) => {
+    handleReplyMessage(message);
+  });
 }

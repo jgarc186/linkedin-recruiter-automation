@@ -16,6 +16,9 @@ function getBot(): TelegramBot {
 
 // For testing only
 export function __testSetMockBot(mockBot: TelegramBot): void {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error('__testSetMockBot is only available in test environment');
+  }
   bot = mockBot as TelegramBot;
 }
 
@@ -23,20 +26,27 @@ function escapeMarkdown(text: string): string {
   return text.replace(/([*_`\[\]])/g, '\\$1');
 }
 
+// Short action codes for Telegram's 64-byte callback_data limit
+const ACTION_CODES: Record<string, string> = {
+  ni: 'not_interested',
+  tm: 'tell_me_more',
+  lt: 'lets_talk',
+};
+
 export const createInlineKeyboard = (messageId: string) => {
   return [
     [
       {
         text: '❌ Not interested',
-        callback_data: JSON.stringify({ message_id: messageId, action: 'not_interested' }),
+        callback_data: JSON.stringify({ m: messageId, a: 'ni' }),
       },
       {
         text: '🤔 Tell me more',
-        callback_data: JSON.stringify({ message_id: messageId, action: 'tell_me_more' }),
+        callback_data: JSON.stringify({ m: messageId, a: 'tm' }),
       },
       {
         text: '✅ Let\'s talk',
-        callback_data: JSON.stringify({ message_id: messageId, action: 'lets_talk' }),
+        callback_data: JSON.stringify({ m: messageId, a: 'lt' }),
       },
     ],
   ];
@@ -80,7 +90,11 @@ export async function handleCallbackQuery(
   }
 
   try {
-    const callbackData: TelegramCallbackData = JSON.parse(query.data);
+    const raw = JSON.parse(query.data);
+    const callbackData: TelegramCallbackData = {
+      message_id: raw.m || raw.message_id,
+      action: (ACTION_CODES[raw.a] || raw.action || raw.a) as TelegramCallbackData['action'],
+    };
 
     // Edit the original message to show the user's choice
     if (query.message) {
