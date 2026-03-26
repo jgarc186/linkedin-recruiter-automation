@@ -14,35 +14,51 @@ export interface CalendarEvent {
   description?: string;
 }
 
+function etHourToUtc(date: Date, etHour: number): Date {
+  // Start with a guess assuming EST (UTC-5)
+  const candidate = new Date(date);
+  candidate.setUTCHours(etHour + 5, 0, 0, 0);
+
+  // Check actual ET hour using Intl
+  const actualEtHour = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: TIMEZONE,
+      hour: 'numeric',
+      hour12: false,
+    }).format(candidate)
+  );
+
+  // Adjust if DST shifted it
+  candidate.setUTCHours(candidate.getUTCHours() + (etHour - actualEtHour));
+  return candidate;
+}
+
 export function generateTimeSlots(): string[] {
   const slots: string[] = [];
   const now = new Date();
   let currentDate = new Date(now);
-  
+
   // Start from tomorrow
   currentDate.setDate(currentDate.getDate() + 1);
-  
+
+  const etHours = [10, 14, 16]; // 10am, 2pm, 4pm ET
+
   while (slots.length < 3) {
     const dayOfWeek = currentDate.getDay();
-    
+
     // Skip weekends (0 = Sunday, 6 = Saturday)
     if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      // Generate slots: 10am, 2pm, 4pm ET
-      const times = ['14:00', '18:00', '20:00']; // UTC times for ET
-      
-      times.forEach(time => {
+      etHours.forEach(etHour => {
         if (slots.length < 3) {
-          const [hours, minutes] = time.split(':');
-          const slot = new Date(currentDate);
-          slot.setUTCHours(parseInt(hours), parseInt(minutes), 0, 0);
+          const slot = etHourToUtc(currentDate, etHour);
           slots.push(slot.toISOString());
         }
       });
     }
-    
+
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  
+
   return slots.slice(0, 3);
 }
 
@@ -127,5 +143,6 @@ Initial call to discuss the opportunity.
   // Use the first suggested time
   const startTime = suggestedTimes[0];
 
-  return createEvent(title, startTime, [], description);
+  const attendees = recruiter.email ? [recruiter.email] : [];
+  return createEvent(title, startTime, attendees, description);
 }

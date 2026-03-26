@@ -66,13 +66,16 @@ describe('calendar.ts', () => {
       expect(firstSlot.getTime()).toBeGreaterThan(now.getTime());
     });
 
-    it('should generate slots during business hours (10am-5pm ET / 14-21 UTC)', () => {
+    it('should generate slots at 10am, 2pm, 4pm Eastern Time', () => {
       const slots = generateTimeSlots();
-      slots.forEach(slot => {
-        const hour = new Date(slot).getUTCHours();
-        expect(hour).toBeGreaterThanOrEqual(14);
-        expect(hour).toBeLessThanOrEqual(20);
+      const etHours = slots.map(slot => {
+        return parseInt(new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York',
+          hour: 'numeric',
+          hour12: false,
+        }).format(new Date(slot)));
       });
+      expect(etHours).toEqual([10, 14, 16]);
     });
 
     it('should skip weekends', () => {
@@ -104,10 +107,24 @@ describe('calendar.ts', () => {
       });
     });
 
-    it('should generate slots at 10am, 2pm, 4pm ET (14, 18, 20 UTC)', () => {
+    it('should generate correct UTC hours during EDT (summer)', () => {
+      // July 15 2026 is during EDT (UTC-4)
+      vi.setSystemTime(new Date('2026-07-15T12:00:00Z'));
+
       const slots = generateTimeSlots();
-      const hours = slots.map(s => new Date(s).getUTCHours());
-      expect(hours).toEqual([14, 18, 20]);
+      const utcHours = slots.map(s => new Date(s).getUTCHours());
+      // 10am EDT = 14 UTC, 2pm EDT = 18 UTC, 4pm EDT = 20 UTC
+      expect(utcHours).toEqual([14, 18, 20]);
+    });
+
+    it('should generate correct UTC hours during EST (winter)', () => {
+      // January 15 2026 is during EST (UTC-5)
+      vi.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+
+      const slots = generateTimeSlots();
+      const utcHours = slots.map(s => new Date(s).getUTCHours());
+      // 10am EST = 15 UTC, 2pm EST = 19 UTC, 4pm EST = 21 UTC
+      expect(utcHours).toEqual([15, 19, 21]);
     });
   });
 
@@ -297,6 +314,24 @@ describe('calendar.ts', () => {
         expect.objectContaining({
           requestBody: expect.objectContaining({
             attendees: [],
+          }),
+        })
+      );
+    });
+
+    it('should include recruiter email as attendee when available', async () => {
+      const recruiterWithEmail = {
+        ...mockRecruiter,
+        email: 'jane@techcorp.com',
+      };
+      const suggestedTimes = ['2026-03-28T14:00:00Z'];
+
+      await scheduleMeeting(recruiterWithEmail, suggestedTimes);
+
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({
+            attendees: [{ email: 'jane@techcorp.com' }],
           }),
         })
       );

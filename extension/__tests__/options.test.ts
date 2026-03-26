@@ -236,5 +236,72 @@ describe('options.ts', () => {
         expect(document.getElementById('save-status')!.textContent).toBe('Settings saved!');
       });
     });
+
+    it('should show HTTP warning for non-localhost URLs', async () => {
+      setupOptionsDOM();
+
+      const mockSet = vi.fn().mockResolvedValue(undefined);
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValueOnce({}),
+            set: mockSet,
+          },
+        },
+      };
+
+      await initOptions();
+
+      (document.getElementById('webhook-url') as HTMLInputElement).value = 'http://remote-server.com';
+      (document.getElementById('api-key') as HTMLInputElement).value = '';
+      (document.getElementById('min-seniority') as HTMLInputElement).value = 'senior';
+      (document.getElementById('preferred-tech') as HTMLInputElement).value = 'Go';
+      (document.getElementById('avoid-keywords') as HTMLInputElement).value = 'PHP';
+      (document.getElementById('locations') as HTMLInputElement).value = 'Remote';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '200000';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        const statusText = document.getElementById('save-status')!.textContent!;
+        expect(statusText).toContain('Warning');
+        expect(statusText.toLowerCase()).toContain('http');
+      });
+
+      // Settings should still be saved despite warning
+      expect(mockSet).toHaveBeenCalled();
+    });
+
+    it('should not show HTTP warning for localhost URLs', async () => {
+      setupOptionsDOM();
+
+      const mockSet = vi.fn().mockResolvedValue(undefined);
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValueOnce({}),
+            set: mockSet,
+          },
+        },
+      };
+
+      await initOptions();
+
+      (document.getElementById('webhook-url') as HTMLInputElement).value = 'http://localhost:8000';
+      (document.getElementById('api-key') as HTMLInputElement).value = '';
+      (document.getElementById('min-seniority') as HTMLInputElement).value = 'senior';
+      (document.getElementById('preferred-tech') as HTMLInputElement).value = 'Go';
+      (document.getElementById('avoid-keywords') as HTMLInputElement).value = 'PHP';
+      (document.getElementById('locations') as HTMLInputElement).value = 'Remote';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '200000';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        expect(document.getElementById('save-status')!.textContent).toBe('Settings saved!');
+      });
+    });
   });
 });

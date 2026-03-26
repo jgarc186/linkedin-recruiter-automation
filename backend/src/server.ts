@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { webhookRoutes } from './routes/webhook.js';
 import { config, validateConfig } from './config.js';
 
@@ -20,6 +21,11 @@ export async function createApp() {
   });
 
   // Register plugins
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+  });
+
   await app.register(cors, {
     origin: /^chrome-extension:\/\//,
     methods: ['GET', 'POST'],

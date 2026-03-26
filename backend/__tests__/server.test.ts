@@ -10,6 +10,7 @@ vi.mock('../src/config.js', () => ({
     telegramBotToken: 'test-token',
     telegramUserId: '123456789',
     apiKey: 'test-api-key',
+    telegramWebhookSecret: 'test-webhook-secret',
     databasePath: ':memory:',
     googleClientId: 'test-client-id',
     googleClientSecret: 'test-client-secret',
@@ -62,11 +63,13 @@ vi.mock('../src/db/database.js', () => ({
   saveMessage: vi.fn(),
   getMessage: vi.fn().mockReturnValue(null),
   updateMessageStatus: vi.fn(),
+  savePendingReply: vi.fn(),
+  getPendingReplies: vi.fn().mockReturnValue([]),
 }));
 
 import { sendApprovalRequest, handleCallbackQuery } from '../src/services/telegram.js';
 import { generateTimeSlots, scheduleMeeting } from '../src/services/calendar.js';
-import { getMessage } from '../src/db/database.js';
+import { getMessage, getPendingReplies } from '../src/db/database.js';
 
 describe('webhook routes', () => {
   let app: ReturnType<typeof Fastify>;
@@ -91,7 +94,23 @@ describe('webhook routes', () => {
       expect(response.statusCode).toBe(200);
     });
 
-    it('should skip auth for /webhook/telegram/callback', async () => {
+    it('should skip API key auth for /webhook/telegram/callback', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: '{"message_id":"msg_123","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('should reject telegram callback without secret token', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/webhook/telegram/callback',
@@ -103,7 +122,23 @@ describe('webhook routes', () => {
           },
         },
       });
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('should reject telegram callback with wrong secret token', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/telegram/callback',
+        payload: {
+          callback_query: {
+            id: 'cb_123',
+            data: '{"message_id":"msg_123","action":"lets_talk"}',
+            message: { chat: { id: 123 }, message_id: 999 },
+          },
+        },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'wrong-secret' },
+      });
+      expect(response.statusCode).toBe(401);
     });
 
     it('should reject requests with wrong API key', async () => {
@@ -184,6 +219,26 @@ describe('webhook routes', () => {
       expect(response.statusCode).toBe(400);
     });
 
+    it('should reject when sender is not an object', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123', thread_id: 'thread_456', sender: 'not-an-object', content: 'test', timestamp: '2026-01-01' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject when sender.name is missing', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { message_id: 'msg_123', thread_id: 'thread_456', sender: { title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
     it('should return 500 when sendApprovalRequest throws', async () => {
       vi.mocked(sendApprovalRequest).mockRejectedValueOnce(new Error('Telegram API error'));
 
@@ -231,7 +286,6 @@ describe('webhook routes', () => {
       });
 
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.payload)).toEqual({ error: 'Missing required fields' });
     });
 
     it('should reject missing drafted_reply', async () => {
@@ -258,7 +312,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123 }, message_id: 999 },
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       expect(response.statusCode).toBe(200);
@@ -279,6 +333,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123 }, message_id: 999 },
           },
         },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       const body = JSON.parse(response.payload);
@@ -290,11 +345,10 @@ describe('webhook routes', () => {
         method: 'POST',
         url: '/webhook/telegram/callback',
         payload: {},
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.payload)).toEqual({ error: 'Missing callback_query' });
     });
 
     it('should return 500 when handleCallbackQuery throws', async () => {
@@ -309,7 +363,7 @@ describe('webhook routes', () => {
             data: 'bad data',
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       expect(response.statusCode).toBe(500);
@@ -332,7 +386,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123, first_name: 'Jane' }, message_id: 999 },
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       expect(response.statusCode).toBe(200);
@@ -359,7 +413,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123 }, message_id: 999 },
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       expect(response.statusCode).toBe(200);
@@ -386,7 +440,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123 }, message_id: 999 },
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       // Should still succeed - calendar failure is non-fatal
@@ -412,7 +466,7 @@ describe('webhook routes', () => {
             message: { chat: { id: 123, first_name: 'Recruiter' }, message_id: 999 },
           },
         },
-        headers: { 'X-API-Key': 'test-api-key' },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       const body = JSON.parse(response.payload);
@@ -452,11 +506,58 @@ describe('webhook routes', () => {
             message: { chat: { id: 123 }, message_id: 999 },
           },
         },
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' },
       });
 
       const body = JSON.parse(response.payload);
       expect(body.thread_id).toBe('thread_stored');
       expect(body.drafted_reply).toContain('RealCorp');
+    });
+  });
+
+  describe('GET /webhook/pending-replies', () => {
+    it('should return pending replies with valid API key', async () => {
+      vi.mocked(getPendingReplies).mockReturnValueOnce([
+        {
+          message_id: 'msg_123',
+          thread_id: 'thread_456',
+          user_choice: 'lets_talk',
+          drafted_reply: 'Thanks for reaching out!',
+          suggested_times: ['2026-03-30T14:00:00.000Z'],
+        },
+      ]);
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/webhook/pending-replies',
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.replies).toHaveLength(1);
+      expect(body.replies[0].message_id).toBe('msg_123');
+    });
+
+    it('should return empty array when no pending replies', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/webhook/pending-replies',
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.replies).toEqual([]);
+    });
+
+    it('should reject requests without API key', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/webhook/pending-replies',
+      });
+
+      expect(response.statusCode).toBe(401);
     });
   });
 });

@@ -10,6 +10,7 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
 } as const;
 
 export function validateConfig(): void {
@@ -21,5 +22,8 @@ export function validateConfig(): void {
   }
   if (!config.telegramUserId) {
     throw new Error('TELEGRAM_USER_ID must be set and non-empty');
+  }
+  if (!config.telegramWebhookSecret) {
+    throw new Error('TELEGRAM_WEBHOOK_SECRET must be set and non-empty');
   }
 }

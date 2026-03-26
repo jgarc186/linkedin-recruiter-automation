@@ -15,6 +15,10 @@ describe('content.ts - reply injection', () => {
         escape: (value: string) => value.replace(/([^\w-])/g, '\\$1'),
       };
     }
+    // Mock execCommand (not implemented in jsdom)
+    if (!document.execCommand) {
+      (document as any).execCommand = vi.fn().mockReturnValue(true);
+    }
   });
 
   afterEach(() => {
@@ -143,29 +147,31 @@ describe('content.ts - reply injection', () => {
   });
 
   describe('sendReply', () => {
-    it('should type reply into LinkedIn message input', () => {
+    it('should focus the input element before typing', () => {
       document.body.innerHTML = `
         <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1"></div>
       `;
 
+      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
+      const focusSpy = vi.spyOn(input, 'focus');
+
       sendReply('thread_1', 'My reply text');
 
-      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
-      expect(input.textContent).toBe('My reply text');
+      expect(focusSpy).toHaveBeenCalled();
     });
 
-    it('should dispatch input event after typing', () => {
+    it('should use execCommand to insert text for React compatibility', () => {
       document.body.innerHTML = `
         <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1"></div>
       `;
 
-      const inputHandler = vi.fn();
-      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
-      input.addEventListener('input', inputHandler);
+      const execMock = vi.fn().mockReturnValue(true);
+      (document as any).execCommand = execMock;
 
       sendReply('thread_1', 'My reply text');
 
-      expect(inputHandler).toHaveBeenCalled();
+      expect(execMock).toHaveBeenCalledWith('selectAll', false);
+      expect(execMock).toHaveBeenCalledWith('insertText', false, 'My reply text');
     });
 
     it('should handle missing input element gracefully', () => {

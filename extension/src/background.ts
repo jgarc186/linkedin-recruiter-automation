@@ -5,12 +5,12 @@ export async function getConfig(): Promise<{ webhookUrl: string; apiKey: string 
     const data = await chrome.storage.local.get('settings');
     const settings = data.settings || {};
     return {
-      webhookUrl: settings.webhookUrl || 'http://localhost:8000/webhook/message',
+      webhookUrl: settings.webhookUrl || 'http://localhost:8000',
       apiKey: settings.apiKey || '',
     };
   } catch {
     return {
-      webhookUrl: 'http://localhost:8000/webhook/message',
+      webhookUrl: 'http://localhost:8000',
       apiKey: '',
     };
   }
@@ -29,7 +29,7 @@ export async function handleWebhookSend(data: MessageData): Promise<void> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const { webhookUrl, apiKey } = await getConfig();
-      const response = await fetch(webhookUrl, {
+      const response = await fetch(`${webhookUrl}/webhook/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -92,18 +92,48 @@ export async function handleWebhookResponse(response: WebhookReplyPayload): Prom
   }
 }
 
+export async function pollPendingReplies(): Promise<void> {
+  try {
+    const { webhookUrl, apiKey } = await getConfig();
+    const response = await fetch(`${webhookUrl}/webhook/pending-replies`, {
+      headers: {
+        'X-API-Key': apiKey,
+      },
+    });
+
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const replies: WebhookReplyPayload[] = data.replies || [];
+
+    for (const reply of replies) {
+      await handleWebhookResponse(reply);
+    }
+  } catch (error) {
+    console.error('Error polling pending replies:', error);
+  }
+}
+
 // Allowed extension IDs that can send external messages
-const ALLOWED_EXTERNAL_SENDERS: string[] = [
+let ALLOWED_EXTERNAL_SENDERS: string[] = [
   // Add your backend/companion extension IDs here
 ];
 
+export function __testSetAllowedSenders(senders: string[]): void {
+  ALLOWED_EXTERNAL_SENDERS = senders;
+}
+
 export function maintainConnection(): void {
-  // Use chrome.alarms for reliable MV3 keep-alive instead of setTimeout
+  // Use chrome.alarms for reliable MV3 keep-alive and polling
   if (chrome.alarms) {
     chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
+    chrome.alarms.create('pollReplies', { periodInMinutes: 0.5 });
     chrome.alarms.onAlarm.addListener((alarm) => {
       if (alarm.name === 'keepAlive') {
         // Heartbeat - keeps service worker alive
+      }
+      if (alarm.name === 'pollReplies') {
+        pollPendingReplies();
       }
     });
   }
@@ -122,7 +152,7 @@ export function maintainConnection(): void {
 
   // Handle external messages with sender validation
   chrome.runtime.onMessageExternal?.addListener((message, sender) => {
-    if (ALLOWED_EXTERNAL_SENDERS.length > 0 && !ALLOWED_EXTERNAL_SENDERS.includes(sender.id || '')) {
+    if (!ALLOWED_EXTERNAL_SENDERS.includes(sender.id || '')) {
       console.warn('Rejected external message from unauthorized sender:', sender.id);
       return;
     }

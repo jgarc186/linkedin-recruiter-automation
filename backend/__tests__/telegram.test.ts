@@ -38,7 +38,17 @@ describe('telegram.ts', () => {
       const keyboard = createInlineKeyboard(messageId);
 
       const callbackData = JSON.parse(keyboard[0][0].callback_data);
-      expect(callbackData.message_id).toBe(messageId);
+      expect(callbackData.m).toBe(messageId);
+    });
+
+    it('should keep callback_data under 64 bytes', () => {
+      const longId = 'msg_thread_12345_1711468800000';
+      const keyboard = createInlineKeyboard(longId);
+
+      keyboard[0].forEach(button => {
+        const bytes = Buffer.byteLength(button.callback_data, 'utf8');
+        expect(bytes).toBeLessThanOrEqual(64);
+      });
     });
   });
 
@@ -122,10 +132,10 @@ describe('telegram.ts', () => {
       id: 'callback_123',
       from: { id: 123456789, first_name: 'Test' },
       message: { chat: { id: 123456789 }, message_id: 999 },
-      data: '{"message_id": "msg_123", "action": "lets_talk"}',
+      data: '{"m": "msg_123", "a": "lt"}',
     };
 
-    it('should parse callback data correctly', async () => {
+    it('should parse abbreviated callback data correctly', async () => {
       const result = await handleCallbackQuery(mockQuery as any);
 
       expect(result).toBeDefined();
@@ -159,7 +169,7 @@ describe('telegram.ts', () => {
       const queryNoMessage = {
         id: 'callback_456',
         from: { id: 123456789, first_name: 'Test' },
-        data: '{"message_id": "msg_123", "action": "not_interested"}',
+        data: '{"m": "msg_123", "a": "ni"}',
       };
 
       const result = await handleCallbackQuery(queryNoMessage as any);
@@ -171,7 +181,7 @@ describe('telegram.ts', () => {
     it('should replace all underscores in action display text', async () => {
       const tellMoreQuery = {
         ...mockQuery,
-        data: '{"message_id": "msg_123", "action": "tell_me_more"}',
+        data: '{"m": "msg_123", "a": "tm"}',
         message: { chat: { id: 123456789 }, message_id: 999, text: 'Original message' },
       };
 

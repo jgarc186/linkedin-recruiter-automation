@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { WebhookMessagePayload, AnalysisResult } from '../../../shared/types.js';
+import type { WebhookMessagePayload, WebhookReplyPayload, AnalysisResult, MessageStatus } from '../../../shared/types.js';
 
 export interface StoredMessage {
   id: string;
@@ -12,7 +12,7 @@ export interface StoredMessage {
   is_match: number | null;
   confidence: number | null;
   suggested_reply_type: string | null;
-  status: string;
+  status: MessageStatus;
   created_at: string;
 }
 
@@ -33,6 +33,18 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id);
   CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
+
+  CREATE TABLE IF NOT EXISTS pending_replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    user_choice TEXT NOT NULL,
+    drafted_reply TEXT NOT NULL,
+    suggested_times TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    delivered INTEGER DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_pending_replies_delivered ON pending_replies(delivered);
 `;
 
 export function initDatabase(path: string = ':memory:'): Database.Database {
@@ -83,8 +95,55 @@ export function getMessage(
 export function updateMessageStatus(
   db: Database.Database,
   messageId: string,
-  status: string
+  status: MessageStatus
 ): void {
   const stmt = db.prepare('UPDATE messages SET status = ? WHERE id = ?');
   stmt.run(status, messageId);
+}
+
+export function savePendingReply(
+  db: Database.Database,
+  reply: WebhookReplyPayload
+): void {
+  const stmt = db.prepare(`
+    INSERT INTO pending_replies (message_id, thread_id, user_choice, drafted_reply, suggested_times)
+    VALUES (@message_id, @thread_id, @user_choice, @drafted_reply, @suggested_times)
+  `);
+
+  stmt.run({
+    message_id: reply.message_id,
+    thread_id: reply.thread_id,
+    user_choice: reply.user_choice,
+    drafted_reply: reply.drafted_reply,
+    suggested_times: reply.suggested_times ? JSON.stringify(reply.suggested_times) : null,
+  });
+}
+
+export function getPendingReplies(
+  db: Database.Database
+): WebhookReplyPayload[] {
+  const select = db.prepare('SELECT * FROM pending_replies WHERE delivered = 0 ORDER BY id');
+  const update = db.prepare('UPDATE pending_replies SET delivered = 1 WHERE delivered = 0');
+
+  const transaction = db.transaction(() => {
+    const rows = select.all() as Array<{
+      message_id: string;
+      thread_id: string;
+      user_choice: 'not_interested' | 'tell_me_more' | 'lets_talk';
+      drafted_reply: string;
+      suggested_times: string | null;
+    }>;
+    update.run();
+    return rows;
+  });
+
+  const rows = transaction();
+
+  return rows.map(row => ({
+    message_id: row.message_id,
+    thread_id: row.thread_id,
+    user_choice: row.user_choice,
+    drafted_reply: row.drafted_reply,
+    suggested_times: row.suggested_times ? JSON.parse(row.suggested_times) : undefined,
+  }));
 }

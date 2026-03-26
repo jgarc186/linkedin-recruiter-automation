@@ -1,16 +1,8 @@
 import type { MessageData, AnalysisResult } from '../../../shared/types.js';
+import { RECRUITER_KEYWORDS as BASE_KEYWORDS } from '../../../shared/constants.js';
 
 export const RECRUITER_KEYWORDS = [
-  'opportunity',
-  'role',
-  'hiring',
-  'position',
-  'interview',
-  'recruiter',
-  'job',
-  'career',
-  'vacancy',
-  'opening',
+  ...BASE_KEYWORDS,
   'senior',
   'staff',
   'principal',

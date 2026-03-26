@@ -107,6 +107,14 @@ export async function initOptions(): Promise<void> {
     };
 
     await saveSettings(newSettings);
-    if (saveStatusEl) saveStatusEl.textContent = 'Settings saved!';
+
+    if (saveStatusEl) {
+      const parsed = new URL(newSettings.webhookUrl);
+      if (parsed.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
+        saveStatusEl.textContent = 'Warning: Using HTTP for a non-localhost URL is insecure. Settings saved.';
+      } else {
+        saveStatusEl.textContent = 'Settings saved!';
+      }
+    }
   });
 }

@@ -35,8 +35,8 @@ export async function initPopup(): Promise<void> {
   const pendingEl = document.getElementById('pending-count');
 
   // Load webhook URL from settings
-  const stored = await chrome.storage.local.get('webhookUrl');
-  const webhookUrl = stored.webhookUrl || 'http://localhost:8000';
+  const stored = await chrome.storage.local.get('settings');
+  const webhookUrl = stored.settings?.webhookUrl || 'http://localhost:8000';
 
   const [status, pendingCount] = await Promise.all([
     getConnectionStatus(webhookUrl),

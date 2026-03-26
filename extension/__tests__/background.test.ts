@@ -4,6 +4,8 @@ import {
   handleWebhookResponse,
   maintainConnection,
   getConfig,
+  pollPendingReplies,
+  __testSetAllowedSenders,
 } from '../src/background';
 import type { MessageData } from '../../shared/types';
 
@@ -87,7 +89,7 @@ describe('background.ts', () => {
         storage: {
           local: {
             get: vi.fn().mockResolvedValue({
-              settings: { webhookUrl: 'http://localhost:8000/webhook/message', apiKey: 'test-key' },
+              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
             }),
           },
         },
@@ -342,7 +344,40 @@ describe('background.ts', () => {
       expect(result).toBe(false);
     });
 
-    it('should handle DRAFTED_REPLY from external messages', async () => {
+    it('should reject external messages when allowlist is empty', async () => {
+      let externalCallback: Function;
+      const mockRuntime = {
+        onMessage: { addListener: vi.fn() },
+        onMessageExternal: {
+          addListener: vi.fn((cb: Function) => { externalCallback = cb; }),
+        },
+      };
+      const mockStorage = { set: vi.fn().mockResolvedValue(undefined) };
+      const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
+      (global as any).chrome = {
+        runtime: mockRuntime,
+        storage: { local: mockStorage },
+        tabs: mockTabs,
+        alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
+      };
+
+      maintainConnection();
+
+      // Send from an unknown extension — should be rejected since allowlist is empty
+      externalCallback!({
+        type: 'DRAFTED_REPLY',
+        data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
+      }, { id: 'unknown-extension-id' });
+
+      // Wait a tick and verify storage was NOT called
+      await vi.advanceTimersByTimeAsync(100);
+      expect(mockStorage.set).not.toHaveBeenCalled();
+    });
+
+    it('should handle DRAFTED_REPLY from allowed external sender', async () => {
+      // Temporarily allow a specific sender
+      __testSetAllowedSenders(['allowed-extension-id']);
+
       let externalCallback: Function;
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
@@ -364,11 +399,86 @@ describe('background.ts', () => {
       externalCallback!({
         type: 'DRAFTED_REPLY',
         data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
-      }, { id: 'some-extension-id' });
+      }, { id: 'allowed-extension-id' });
 
       await vi.waitFor(() => {
         expect(mockStorage.set).toHaveBeenCalled();
       });
+
+      // Reset allowlist
+      __testSetAllowedSenders([]);
+    });
+  });
+
+  describe('pollPendingReplies', () => {
+    it('should fetch pending replies and call handleWebhookResponse for each', async () => {
+      const mockStorage = { set: vi.fn().mockResolvedValue(undefined) };
+      const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
+      (global as any).chrome = {
+        storage: {
+          local: {
+            ...mockStorage,
+            get: vi.fn().mockResolvedValue({
+              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
+            }),
+          },
+        },
+        tabs: mockTabs,
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          replies: [
+            { message_id: 'msg_1', thread_id: 't_1', user_choice: 'lets_talk', drafted_reply: 'Hello' },
+            { message_id: 'msg_2', thread_id: 't_2', user_choice: 'not_interested', drafted_reply: 'No thanks' },
+          ],
+        }),
+      });
+
+      await pollPendingReplies();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://localhost:8000/webhook/pending-replies',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-API-Key': 'test-key' }),
+        })
+      );
+      // handleWebhookResponse should be called for each reply (stores in chrome.storage)
+      expect(mockStorage.set).toHaveBeenCalledTimes(2);
+    });
+
+    it('should handle fetch errors gracefully', async () => {
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({
+              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
+            }),
+          },
+        },
+      };
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(pollPendingReplies()).resolves.not.toThrow();
+    });
+
+    it('should be triggered by pollReplies alarm', () => {
+      let alarmCallback: Function;
+      const mockAlarms = {
+        create: vi.fn(),
+        onAlarm: { addListener: vi.fn((cb: Function) => { alarmCallback = cb; }) },
+      };
+      const mockRuntime = {
+        onMessage: { addListener: vi.fn() },
+        onMessageExternal: { addListener: vi.fn() },
+      };
+      (global as any).chrome = { runtime: mockRuntime, alarms: mockAlarms };
+
+      maintainConnection();
+
+      expect(mockAlarms.create).toHaveBeenCalledWith('pollReplies', { periodInMinutes: 0.5 });
     });
   });
 

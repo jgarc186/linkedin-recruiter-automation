@@ -2,6 +2,7 @@ export interface RecruiterProfile {
   name: string;
   title: string;
   company: string;
+  email?: string;
 }
 
 export interface MessageData {
@@ -34,6 +35,8 @@ export interface WebhookReplyPayload {
   drafted_reply: string;
   suggested_times?: string[];
 }
+
+export type MessageStatus = 'pending' | 'not_interested' | 'tell_me_more' | 'lets_talk' | 'replied';
 
 export interface TelegramCallbackData {
   message_id: string;
