@@ -137,7 +137,7 @@ export function getPendingReplies(
     return rows;
   });
 
-  const rows = transaction();
+  const rows = transaction.exclusive();
 
   return rows.map(row => ({
     message_id: row.message_id,
