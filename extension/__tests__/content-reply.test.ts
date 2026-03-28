@@ -15,10 +15,17 @@ describe('content.ts - reply injection', () => {
         escape: (value: string) => value.replace(/([^\w-])/g, '\\$1'),
       };
     }
-    // Mock execCommand (not implemented in jsdom)
-    if (!document.execCommand) {
-      (document as any).execCommand = vi.fn().mockReturnValue(true);
-    }
+    // Mock Selection/Range APIs for jsdom (used by sendReply cursor positioning)
+    const mockRange = {
+      selectNodeContents: vi.fn(),
+      collapse: vi.fn(),
+    };
+    const mockSelection = {
+      removeAllRanges: vi.fn(),
+      addRange: vi.fn(),
+    };
+    vi.spyOn(document, 'createRange').mockReturnValue(mockRange as any);
+    vi.spyOn(window, 'getSelection').mockReturnValue(mockSelection as any);
   });
 
   afterEach(() => {
@@ -160,18 +167,38 @@ describe('content.ts - reply injection', () => {
       expect(focusSpy).toHaveBeenCalled();
     });
 
-    it('should use execCommand to insert text for React compatibility', () => {
+    it('should set textContent and dispatch InputEvent for React compatibility', () => {
+      document.body.innerHTML = `
+        <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1">old text</div>
+      `;
+
+      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
+      const dispatchSpy = vi.spyOn(input, 'dispatchEvent');
+
+      sendReply('thread_1', 'My reply text');
+
+      expect(input.textContent).toBe('My reply text');
+      expect(dispatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'input',
+          bubbles: true,
+          inputType: 'insertText',
+          data: 'My reply text',
+        })
+      );
+    });
+
+    it('should position cursor at end of inserted text', () => {
       document.body.innerHTML = `
         <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1"></div>
       `;
 
-      const execMock = vi.fn().mockReturnValue(true);
-      (document as any).execCommand = execMock;
-
       sendReply('thread_1', 'My reply text');
 
-      expect(execMock).toHaveBeenCalledWith('selectAll', false);
-      expect(execMock).toHaveBeenCalledWith('insertText', false, 'My reply text');
+      const mockSelection = window.getSelection();
+      expect(mockSelection!.removeAllRanges).toHaveBeenCalled();
+      expect(mockSelection!.addRange).toHaveBeenCalled();
+      expect(document.createRange).toHaveBeenCalled();
     });
 
     it('should handle missing input element gracefully', () => {

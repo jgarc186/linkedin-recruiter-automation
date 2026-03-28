@@ -162,10 +162,30 @@ export function sendReply(threadId: string, text: string): void {
 
   if (!input) return;
 
-  // Use execCommand for React-controlled contenteditable compatibility
   input.focus();
-  document.execCommand('selectAll', false);
-  document.execCommand('insertText', false, text);
+
+  // Set content directly, then dispatch InputEvent so React reconciles
+  input.textContent = text;
+
+  // Position cursor at end of inserted text
+  const selection = window.getSelection();
+  if (selection && input.childNodes.length > 0) {
+    const range = document.createRange();
+    range.selectNodeContents(input);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // Notify React's synthetic event system
+  input.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      cancelable: false,
+      inputType: 'insertText',
+      data: text,
+    })
+  );
 }
 
 export interface ReplyMessage {
