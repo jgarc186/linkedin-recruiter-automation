@@ -47,16 +47,18 @@ describe('analyzer.ts', () => {
       expect(result.suggested_reply_type).toBe('lets_talk');
     });
 
-    it('should return medium-to-high confidence for general backend roles', () => {
+    it('should return moderate confidence for general backend roles without seniority', () => {
       const message = {
         ...baseMessage,
+        sender: { ...baseMessage.sender, title: 'Technical Recruiter at TechCorp' }, // Neutral title without seniority
         content: 'We have a Backend Engineer position available.',
       };
 
       const result = analyzeRole(message);
 
-      expect(result.confidence).toBeGreaterThan(0.2);
-      expect(result.confidence).toBeLessThan(0.7);
+      // Backend tech matches (0.3) but no seniority level specified
+      expect(result.confidence).toBe(0.3);
+      expect(result.reasons).toContain('Backend mentioned');
     });
 
     it('should return low confidence for frontend roles', () => {
@@ -359,13 +361,17 @@ describe('analyzer.ts', () => {
     });
 
     it('should use custom criteria in not_interested reply', () => {
-      const reply = draftReply('not_interested', mockMessage, undefined, {
-        minSeniority: 'staff',
-        preferredTechStack: ['Python', 'Java'],
-        avoidKeywords: [],
-        locations: [],
-        minCompensation: 150000,
-      });
+      const messageWithCriteria: MessageData = {
+        ...mockMessage,
+        criteria: {
+          minSeniority: 'staff',
+          preferredTechStack: ['Python', 'Java'],
+          avoidKeywords: [],
+          locations: [],
+          minCompensation: 150000,
+        },
+      };
+      const reply = draftReply('not_interested', messageWithCriteria);
 
       expect(reply).toContain('Staff+ Engineer roles in Python/Java');
     });

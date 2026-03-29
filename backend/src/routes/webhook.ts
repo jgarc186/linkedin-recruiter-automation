@@ -41,11 +41,11 @@ const messageSchema = {
       criteria: {
         type: 'object',
         properties: {
-          minSeniority: { type: 'string' },
-          preferredTechStack: { type: 'array', items: { type: 'string' } },
-          avoidKeywords: { type: 'array', items: { type: 'string' } },
-          locations: { type: 'array', items: { type: 'string' } },
-          minCompensation: { type: 'number' },
+          minSeniority: { type: 'string', enum: ['junior', 'mid', 'senior', 'staff', 'principal'] },
+          preferredTechStack: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          avoidKeywords: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          locations: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          minCompensation: { type: 'number', minimum: 0 },
         },
       },
     },
@@ -184,7 +184,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Draft reply based on user choice, passing suggestedTimes for dynamic slot display
-      const draftedReply = draftReply(result.action, messageData, suggestedTimes, messageData.criteria);
+      const draftedReply = draftReply(result.action, messageData, suggestedTimes);
 
       // Update message status
       updateMessageStatus(db, result.message_id, result.action);

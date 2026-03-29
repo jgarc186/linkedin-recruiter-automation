@@ -27,9 +27,13 @@ const SENIORITY_RANKS: Record<string, number> = {
 
 function matchesTech(lowerContent: string, keyword: string): boolean {
   const lower = keyword.toLowerCase();
-  // "Go" needs word-boundary matching to avoid false positives (e.g., "good")
-  if (lower === 'go') {
-    return /\bgo\b/.test(lowerContent) || lowerContent.includes('golang');
+  // Short keywords (≤2 chars) need word-boundary matching to avoid false positives (e.g., "C" in "company", "go" in "good")
+  if (lower.length <= 2) {
+    // Special case: "go" can also match "golang"
+    if (lower === 'go') {
+      return /\bgo\b/.test(lowerContent) || lowerContent.includes('golang');
+    }
+    return new RegExp(`\\b${lower}\\b`).test(lowerContent);
   }
   return lowerContent.includes(lower);
 }
@@ -56,19 +60,24 @@ export function analyzeRole(messageData: MessageData): AnalysisResult {
 
   // Check seniority
   const minRank = SENIORITY_RANKS[criteria.minSeniority.toLowerCase()] ?? 3;
-  const hasSenior = lowerContent.includes('senior') || lowerTitle.includes('senior');
-  const hasStaff = lowerContent.includes('staff') || lowerTitle.includes('staff');
   const hasPrincipal = lowerContent.includes('principal') || lowerTitle.includes('principal');
+  const hasStaff = lowerContent.includes('staff') || lowerTitle.includes('staff');
+  const hasSenior = lowerContent.includes('senior') || lowerTitle.includes('senior');
+  const hasMid = lowerContent.includes('mid-level') || lowerContent.includes('mid level') || lowerTitle.includes('mid-level') || lowerTitle.includes('mid level');
+  const hasJunior = lowerContent.includes('junior') || lowerTitle.includes('junior');
 
-  const detectedRank = hasPrincipal ? 5 : hasStaff ? 4 : hasSenior ? 3 : 0;
+  const detectedRank = hasPrincipal ? 5 : hasStaff ? 4 : hasSenior ? 3 : hasMid ? 2 : hasJunior ? 1 : 0;
 
   if (detectedRank > 0 && detectedRank >= minRank) {
     if (detectedRank >= 4) {
       score += 0.3;
       reasons.push('Staff/Principal level role');
-    } else {
+    } else if (detectedRank === 3) {
       score += 0.2;
       reasons.push('Senior level role');
+    } else {
+      score += 0.1;
+      reasons.push('Mid/Junior level role');
     }
   }
 
@@ -150,11 +159,10 @@ function formatTimeSlots(suggestedTimes?: string[]): string {
 export function draftReply(
   choice: 'not_interested' | 'tell_me_more' | 'lets_talk',
   messageData: MessageData,
-  suggestedTimes?: string[],
-  criteria?: UserCriteria
+  suggestedTimes?: string[]
 ): string {
   const { sender } = messageData;
-  const resolved = criteria ?? messageData.criteria ?? DEFAULT_CRITERIA;
+  const resolved = messageData.criteria ?? DEFAULT_CRITERIA;
 
   switch (choice) {
     case 'not_interested': {
