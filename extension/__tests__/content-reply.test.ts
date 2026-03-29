@@ -193,12 +193,17 @@ describe('content.ts - reply injection', () => {
         <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1"></div>
       `;
 
+      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
+
       sendReply('thread_1', 'My reply text');
 
+      const mockRange = document.createRange();
       const mockSelection = window.getSelection();
-      expect(mockSelection!.removeAllRanges).toHaveBeenCalled();
-      expect(mockSelection!.addRange).toHaveBeenCalled();
       expect(document.createRange).toHaveBeenCalled();
+      expect(mockRange.selectNodeContents).toHaveBeenCalledWith(input);
+      expect(mockRange.collapse).toHaveBeenCalledWith(false);
+      expect(mockSelection!.removeAllRanges).toHaveBeenCalled();
+      expect(mockSelection!.addRange).toHaveBeenCalledWith(mockRange);
     });
 
     it('should handle missing input element gracefully', () => {

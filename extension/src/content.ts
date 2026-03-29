@@ -167,6 +167,12 @@ export function sendReply(threadId: string, text: string): void {
   // Set content directly, then dispatch InputEvent so React reconciles
   input.textContent = text;
 
+  // Reset React's internal value tracker so it detects the change
+  const tracker = (input as any)._valueTracker;
+  if (tracker) {
+    tracker.setValue('');
+  }
+
   // Position cursor at end of inserted text
   const selection = window.getSelection();
   if (selection && input.childNodes.length > 0) {
