@@ -1,4 +1,5 @@
-import type { MessageData, AnalysisResult } from '../../../shared/types.js';
+import type { MessageData, AnalysisResult, UserCriteria } from '../../../shared/types.js';
+import { DEFAULT_CRITERIA } from '../../../shared/types.js';
 import { RECRUITER_KEYWORDS as BASE_KEYWORDS } from '../../../shared/constants.js';
 
 export const RECRUITER_KEYWORDS = [
@@ -16,21 +17,25 @@ export const RECRUITER_KEYWORDS = [
   'platform',
 ];
 
-// Negative signals
-const NEGATIVE_KEYWORDS = [
-  'php',
-  'wordpress',
-  'frontend-only',
-  'frontend only',
-  'consulting',
-  'staff augmentation',
-  'contract',
-];
+const SENIORITY_RANKS: Record<string, number> = {
+  junior: 1,
+  mid: 2,
+  senior: 3,
+  staff: 4,
+  principal: 5,
+};
 
-// High-priority signals
-const HIGH_VALUE_KEYWORDS = ['golang', 'rust', 'distributed', 'senior', 'staff'];
+function matchesTech(lowerContent: string, keyword: string): boolean {
+  const lower = keyword.toLowerCase();
+  // "Go" needs word-boundary matching to avoid false positives (e.g., "good")
+  if (lower === 'go') {
+    return /\bgo\b/.test(lowerContent) || lowerContent.includes('golang');
+  }
+  return lowerContent.includes(lower);
+}
 
 export function analyzeRole(messageData: MessageData): AnalysisResult {
+  const criteria = messageData.criteria ?? DEFAULT_CRITERIA;
   const { content, sender } = messageData;
   const lowerContent = content.toLowerCase();
   const lowerTitle = sender.title?.toLowerCase() ?? '';
@@ -38,69 +43,70 @@ export function analyzeRole(messageData: MessageData): AnalysisResult {
   let score = 0;
   const reasons: string[] = [];
 
-  // Check for high-value keywords - use word boundary for "go"
-  const hasGo = /\bgo\b/.test(lowerContent) || lowerContent.includes('golang');
-  const hasRust = lowerContent.includes('rust');
-
-  if (hasGo) {
-    score += 0.3;
-    reasons.push('Go experience mentioned');
+  // Check preferred tech stack (cap contribution at 0.6)
+  let techScore = 0;
+  for (const tech of criteria.preferredTechStack) {
+    if (matchesTech(lowerContent, tech)) {
+      techScore += 0.3;
+      reasons.push(`${tech} mentioned`);
+    }
   }
-
-  if (hasRust) {
-    score += 0.3;
-    reasons.push('Rust experience mentioned');
-  }
+  techScore = Math.min(techScore, 0.6);
+  score += techScore;
 
   // Check seniority
+  const minRank = SENIORITY_RANKS[criteria.minSeniority.toLowerCase()] ?? 3;
   const hasSenior = lowerContent.includes('senior') || lowerTitle.includes('senior');
   const hasStaff = lowerContent.includes('staff') || lowerTitle.includes('staff');
   const hasPrincipal = lowerContent.includes('principal') || lowerTitle.includes('principal');
 
-  if (hasStaff || hasPrincipal) {
-    score += 0.3;
-    reasons.push('Staff/Principal level role');
-  } else if (hasSenior) {
-    score += 0.2;
-    reasons.push('Senior level role');
+  const detectedRank = hasPrincipal ? 5 : hasStaff ? 4 : hasSenior ? 3 : 0;
+
+  if (detectedRank > 0 && detectedRank >= minRank) {
+    if (detectedRank >= 4) {
+      score += 0.3;
+      reasons.push('Staff/Principal level role');
+    } else {
+      score += 0.2;
+      reasons.push('Senior level role');
+    }
   }
 
-  // Check backend/distributed systems
-  if (lowerContent.includes('distributed') || lowerContent.includes('backend')) {
-    score += 0.2;
-    reasons.push('Backend/distributed systems work');
-  }
-
-  // Check for negative signals
-  const hasNegativeKeywords = NEGATIVE_KEYWORDS.some(kw => lowerContent.includes(kw));
+  // Check for avoid keywords (negative signals)
+  const avoidLower = criteria.avoidKeywords.map(k => k.toLowerCase());
+  const hasAvoidKeywords = avoidLower.some(kw => lowerContent.includes(kw));
   const isAgency = lowerTitle.includes('consulting') ||
                    lowerTitle.includes('staffing') ||
                    lowerContent.includes('staff augmentation');
 
   // Check compensation
+  const compThresholdK = criteria.minCompensation / 1000;
   const compMatch = content.match(/\$([\d,]+)k/i);
   if (compMatch) {
     const comp = parseInt(compMatch[1].replace(/,/g, ''), 10);
-    if (comp >= 200) {
+    if (comp >= compThresholdK) {
       score += 0.2;
       reasons.push(`Compensation $${comp}K meets threshold`);
     } else {
       score -= 0.3;
-      reasons.push(`Compensation $${comp}K below $200K threshold`);
+      reasons.push(`Compensation $${comp}K below $${compThresholdK}K threshold`);
     }
   }
 
-  // Check location
-  if (lowerContent.includes('remote') || lowerContent.includes('charlotte')) {
+  // Check locations
+  const matchedLocation = criteria.locations.find(loc =>
+    lowerContent.includes(loc.toLowerCase())
+  );
+  if (matchedLocation) {
     score += 0.1;
-    reasons.push('Location matches preference (Remote/Charlotte)');
+    reasons.push(`Location matches preference (${criteria.locations.join('/')})`);
   }
 
   // Negative adjustments
-  if (hasNegativeKeywords || isAgency) {
+  if (hasAvoidKeywords || isAgency) {
     score -= 0.5;
     if (isAgency) reasons.push('Agency/consulting role - lower priority');
-    else reasons.push('Contains non-preferred tech (PHP/WordPress/etc)');
+    else reasons.push('Contains non-preferred keywords');
   }
 
   // Final decision
@@ -144,21 +150,26 @@ function formatTimeSlots(suggestedTimes?: string[]): string {
 export function draftReply(
   choice: 'not_interested' | 'tell_me_more' | 'lets_talk',
   messageData: MessageData,
-  suggestedTimes?: string[]
+  suggestedTimes?: string[],
+  criteria?: UserCriteria
 ): string {
   const { sender } = messageData;
+  const resolved = criteria ?? messageData.criteria ?? DEFAULT_CRITERIA;
 
   switch (choice) {
-    case 'not_interested':
+    case 'not_interested': {
+      const seniority = resolved.minSeniority.charAt(0).toUpperCase() + resolved.minSeniority.slice(1);
+      const techFocus = resolved.preferredTechStack.join('/');
       return `Hi ${sender.name.split(' ')[0]},
 
 Thanks for reaching out about the opportunity at ${sender.company}.
 
-After reviewing the details, this doesn't align with my current career focus. I'm specifically targeting Senior/Staff Engineer roles in Go/Rust backend systems.
+After reviewing the details, this doesn't align with my current career focus. I'm specifically targeting ${seniority}+ Engineer roles in ${techFocus}.
 
 I appreciate you thinking of me and wish you luck in your search!
 
 Best regards`;
+    }
 
     case 'tell_me_more':
       return `Hi ${sender.name.split(' ')[0]},

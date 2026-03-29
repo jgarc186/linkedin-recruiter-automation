@@ -57,6 +57,33 @@ describe('background.ts', () => {
       expect(config.apiKey).toBe('');
     });
 
+    it('should read criteria from settings', async () => {
+      const criteria = {
+        minSeniority: 'staff',
+        preferredTechStack: ['Python'],
+        avoidKeywords: [],
+        locations: ['Remote'],
+        minCompensation: 150000,
+      };
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValueOnce({
+              settings: {
+                webhookUrl: 'http://localhost:8000',
+                apiKey: 'test-key',
+                criteria,
+              },
+            }),
+          },
+        },
+      };
+
+      const config = await getConfig();
+      expect(config.criteria).toEqual(criteria);
+    });
+
     it('should return defaults on storage error', async () => {
       (global as any).chrome = {
         storage: {
@@ -170,6 +197,46 @@ describe('background.ts', () => {
       await sendPromise;
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should include criteria from settings in payload', async () => {
+      const criteria = {
+        minSeniority: 'staff',
+        preferredTechStack: ['Python', 'Java'],
+        avoidKeywords: ['PHP'],
+        locations: ['Austin'],
+        minCompensation: 150000,
+      };
+
+      (global as any).chrome.storage.local.get = vi.fn().mockResolvedValue({
+        settings: {
+          webhookUrl: 'http://localhost:8000',
+          apiKey: 'test-key',
+          criteria,
+        },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+      await handleWebhookSend(mockMessage);
+
+      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(requestBody.criteria).toEqual(criteria);
+    });
+
+    it('should omit criteria from payload when not in settings', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+      await handleWebhookSend(mockMessage);
+
+      const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(requestBody.criteria).toBeUndefined();
     });
   });
 

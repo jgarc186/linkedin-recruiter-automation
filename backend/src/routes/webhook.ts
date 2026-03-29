@@ -38,6 +38,16 @@ const messageSchema = {
       },
       content: { type: 'string' },
       timestamp: { type: 'string' },
+      criteria: {
+        type: 'object',
+        properties: {
+          minSeniority: { type: 'string' },
+          preferredTechStack: { type: 'array', items: { type: 'string' } },
+          avoidKeywords: { type: 'array', items: { type: 'string' } },
+          locations: { type: 'array', items: { type: 'string' } },
+          minCompensation: { type: 'number' },
+        },
+      },
     },
   },
 };
@@ -174,7 +184,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Draft reply based on user choice, passing suggestedTimes for dynamic slot display
-      const draftedReply = draftReply(result.action, messageData, suggestedTimes);
+      const draftedReply = draftReply(result.action, messageData, suggestedTimes, messageData.criteria);
 
       // Update message status
       updateMessageStatus(db, result.message_id, result.action);

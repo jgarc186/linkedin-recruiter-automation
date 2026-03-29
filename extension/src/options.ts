@@ -1,10 +1,7 @@
-export interface UserCriteria {
-  minSeniority: string;
-  preferredTechStack: string[];
-  avoidKeywords: string[];
-  locations: string[];
-  minCompensation: number;
-}
+import type { UserCriteria } from '../../shared/types';
+import { DEFAULT_CRITERIA } from '../../shared/types';
+
+export type { UserCriteria };
 
 export interface ExtensionSettings {
   webhookUrl: string;
@@ -15,13 +12,7 @@ export interface ExtensionSettings {
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   webhookUrl: 'http://localhost:8000',
   apiKey: '',
-  criteria: {
-    minSeniority: 'senior',
-    preferredTechStack: ['Go', 'Rust', 'Distributed Systems', 'Backend'],
-    avoidKeywords: ['PHP', 'WordPress', 'Staff Augmentation', 'Frontend-only'],
-    locations: ['Remote', 'Charlotte, NC'],
-    minCompensation: 200000,
-  },
+  criteria: DEFAULT_CRITERIA,
 };
 
 export async function loadSettings(): Promise<ExtensionSettings> {
