@@ -5,7 +5,11 @@ import {
   maintainConnection,
   getConfig,
   pollPendingReplies,
+  processPendingSends,
   __testSetAllowedSenders,
+  __testOnAlarmHandler,
+  __testOnMessageHandler,
+  __testOnExternalMessageHandler,
 } from '../src/background';
 import type { MessageData } from '../../shared/types';
 
@@ -118,6 +122,7 @@ describe('background.ts', () => {
             get: vi.fn().mockResolvedValue({
               settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
             }),
+            set: vi.fn().mockResolvedValue(undefined),
           },
         },
       };
@@ -165,10 +170,9 @@ describe('background.ts', () => {
     it('should handle network errors gracefully', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
-      const sendPromise = handleWebhookSend(mockMessage);
-      // Advance past all retry delays (1000 + 2000 + 3000)
-      await vi.advanceTimersByTimeAsync(10000);
-      await expect(sendPromise).resolves.not.toThrow();
+      await expect(handleWebhookSend(mockMessage)).resolves.not.toThrow();
+      // Should have enqueued to pending_sends since single attempt failed
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalled();
     });
 
     it('should handle HTTP error responses', async () => {
@@ -178,25 +182,25 @@ describe('background.ts', () => {
         statusText: 'Internal Server Error',
       });
 
-      const sendPromise = handleWebhookSend(mockMessage);
-      await vi.advanceTimersByTimeAsync(10000);
-      await expect(sendPromise).resolves.not.toThrow();
+      await expect(handleWebhookSend(mockMessage)).resolves.not.toThrow();
+      // Should have enqueued to pending_sends since single attempt failed
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalled();
     });
 
-    it('should retry on failure', async () => {
-      mockFetch
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ success: true }),
-        });
+    it('should queue message on failure for retry by processPendingSends', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
-      const sendPromise = handleWebhookSend(mockMessage);
-      // Advance past retry delay
-      await vi.advanceTimersByTimeAsync(2000);
-      await sendPromise;
+      await handleWebhookSend(mockMessage);
 
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // Single attempt made (no retry loop inside handleWebhookSend)
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      // But message should be enqueued to pending_sends for later retry
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pending_sends: expect.any(Array),
+        })
+      );
     });
 
     it('should include criteria from settings in payload', async () => {
@@ -237,6 +241,131 @@ describe('background.ts', () => {
 
       const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(requestBody.criteria).toBeUndefined();
+    });
+  });
+
+  describe('processPendingSends', () => {
+    it('should retry pending sends and remove successful ones', async () => {
+      const pendingSends = [
+        {
+          id: 'send_1',
+          data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 1,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({ ok: true });
+
+      await processPendingSends();
+
+      // Should have attempted fetch
+      expect(mockFetch).toHaveBeenCalled();
+      // Should have written updated (empty) list to storage
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({
+        pending_sends: [],
+      });
+    });
+
+    it('should keep failed sends in queue with incremented attempts', async () => {
+      const pendingSends = [
+        {
+          id: 'send_1',
+          data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      await processPendingSends();
+
+      // Should have attempted fetch
+      expect(mockFetch).toHaveBeenCalled();
+      // Should have written queue with failed send and incremented attempts
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pending_sends: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'send_1',
+              attempts: 1,
+            }),
+          ]),
+        })
+      );
+    });
+
+    it('should prune stale sends older than TTL', async () => {
+      const staleTime = Date.now() - (25 * 60 * 60 * 1000); // older than 24h TTL
+      const pendingSends = [
+        {
+          id: 'stale_send',
+          data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: staleTime,
+          attempts: 5,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValueOnce({ pending_sends: pendingSends }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await processPendingSends();
+
+      // Should NOT attempt to fetch stale send
+      expect(mockFetch).not.toHaveBeenCalled();
+      // Should have written empty queue (stale entry pruned)
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({
+        pending_sends: [],
+      });
+    });
+
+    it('should handle empty pending sends queue', async () => {
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValueOnce({ pending_sends: [] }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await processPendingSends();
+
+      // Should not fetch anything
+      expect(mockFetch).not.toHaveBeenCalled();
+      // Should write empty queue to storage
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({
+        pending_sends: [],
+      });
     });
   });
 
@@ -329,57 +458,23 @@ describe('background.ts', () => {
       expect(mockAlarms.create).toHaveBeenCalledWith('keepAlive', { periodInMinutes: 1 });
     });
 
-    it('should set up message listener', () => {
-      const mockRuntime = {
-        onMessage: { addListener: vi.fn() },
-        onMessageExternal: { addListener: vi.fn() },
-      };
-      (global as any).chrome = { runtime: mockRuntime, alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } } };
-
-      maintainConnection();
-
-      expect(mockRuntime.onMessage.addListener).toHaveBeenCalled();
-    });
-
-    it('should listen for external messages with sender validation', () => {
-      const mockOnMessageExternal = { addListener: vi.fn() };
-      const mockRuntime = {
-        onMessage: { addListener: vi.fn() },
-        onMessageExternal: mockOnMessageExternal,
-      };
-      (global as any).chrome = { runtime: mockRuntime, alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } } };
-
-      maintainConnection();
-
-      expect(mockOnMessageExternal.addListener).toHaveBeenCalled();
-    });
 
     it('should handle NEW_MESSAGE_DETECTED and call sendResponse on success', async () => {
-      let messageCallback: Function;
-      const mockRuntime = {
-        onMessage: {
-          addListener: vi.fn((cb: Function) => { messageCallback = cb; }),
-        },
-        onMessageExternal: { addListener: vi.fn() },
-      };
       (global as any).chrome = {
-        runtime: mockRuntime,
-        alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
         storage: {
           local: {
             get: vi.fn().mockResolvedValue({
               settings: { webhookUrl: 'http://localhost:8000/webhook/message', apiKey: '' },
             }),
+            set: vi.fn().mockResolvedValue(undefined),
           },
         },
       };
 
       mockFetch.mockResolvedValueOnce({ ok: true });
 
-      maintainConnection();
-
       const sendResponse = vi.fn();
-      const result = messageCallback!(
+      const result = __testOnMessageHandler(
         { type: 'NEW_MESSAGE_DETECTED', data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' } },
         {},
         sendResponse
@@ -394,44 +489,22 @@ describe('background.ts', () => {
     });
 
     it('should return false for unknown message types', () => {
-      let messageCallback: Function;
-      const mockRuntime = {
-        onMessage: {
-          addListener: vi.fn((cb: Function) => { messageCallback = cb; }),
-        },
-        onMessageExternal: { addListener: vi.fn() },
-      };
-      (global as any).chrome = { runtime: mockRuntime, alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } } };
-
-      maintainConnection();
-
       const sendResponse = vi.fn();
-      const result = messageCallback!({ type: 'UNKNOWN' }, {}, sendResponse);
+      const result = __testOnMessageHandler({ type: 'UNKNOWN' }, {}, sendResponse);
 
       expect(result).toBe(false);
     });
 
     it('should reject external messages when allowlist is empty', async () => {
-      let externalCallback: Function;
-      const mockRuntime = {
-        onMessage: { addListener: vi.fn() },
-        onMessageExternal: {
-          addListener: vi.fn((cb: Function) => { externalCallback = cb; }),
-        },
-      };
-      const mockStorage = { set: vi.fn().mockResolvedValue(undefined) };
+      const mockStorage = { set: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({}) };
       const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
       (global as any).chrome = {
-        runtime: mockRuntime,
         storage: { local: mockStorage },
         tabs: mockTabs,
-        alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
       };
 
-      maintainConnection();
-
       // Send from an unknown extension — should be rejected since allowlist is empty
-      externalCallback!({
+      __testOnExternalMessageHandler({
         type: 'DRAFTED_REPLY',
         data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
       }, { id: 'unknown-extension-id' });
@@ -445,25 +518,14 @@ describe('background.ts', () => {
       // Temporarily allow a specific sender
       __testSetAllowedSenders(['allowed-extension-id']);
 
-      let externalCallback: Function;
-      const mockRuntime = {
-        onMessage: { addListener: vi.fn() },
-        onMessageExternal: {
-          addListener: vi.fn((cb: Function) => { externalCallback = cb; }),
-        },
-      };
-      const mockStorage = { set: vi.fn().mockResolvedValue(undefined) };
+      const mockStorage = { set: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({}) };
       const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
       (global as any).chrome = {
-        runtime: mockRuntime,
         storage: { local: mockStorage },
         tabs: mockTabs,
-        alarms: { create: vi.fn(), onAlarm: { addListener: vi.fn() } },
       };
 
-      maintainConnection();
-
-      externalCallback!({
+      __testOnExternalMessageHandler({
         type: 'DRAFTED_REPLY',
         data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
       }, { id: 'allowed-extension-id' });
@@ -531,11 +593,28 @@ describe('background.ts', () => {
       await expect(pollPendingReplies()).resolves.not.toThrow();
     });
 
+    it('should call processPendingSends on keepAlive alarm', async () => {
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({ pending_sends: [] }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      __testOnAlarmHandler({ name: 'keepAlive' } as chrome.alarms.Alarm);
+
+      // processPendingSends should have been called (and thus storage.local.get)
+      await vi.waitFor(() => {
+        expect((global as any).chrome.storage.local.get).toHaveBeenCalledWith('pending_sends');
+      });
+    });
+
     it('should be triggered by pollReplies alarm', () => {
-      let alarmCallback: Function;
       const mockAlarms = {
         create: vi.fn(),
-        onAlarm: { addListener: vi.fn((cb: Function) => { alarmCallback = cb; }) },
+        onAlarm: { addListener: vi.fn() },
       };
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
