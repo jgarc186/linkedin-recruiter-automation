@@ -1,12 +1,13 @@
-import type { MessageData, WebhookReplyPayload } from '../../shared/types';
+import type { MessageData, WebhookReplyPayload, UserCriteria } from '../../shared/types';
 
-export async function getConfig(): Promise<{ webhookUrl: string; apiKey: string }> {
+export async function getConfig(): Promise<{ webhookUrl: string; apiKey: string; criteria?: UserCriteria }> {
   try {
     const data = await chrome.storage.local.get('settings');
     const settings = data.settings || {};
     return {
       webhookUrl: settings.webhookUrl || 'http://localhost:8000',
       apiKey: settings.apiKey || '',
+      criteria: settings.criteria,
     };
   } catch {
     return {
@@ -28,14 +29,15 @@ export async function handleWebhookSend(data: MessageData): Promise<void> {
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const { webhookUrl, apiKey } = await getConfig();
+      const { webhookUrl, apiKey, criteria } = await getConfig();
+      const payload = criteria ? { ...data, criteria } : data;
       const response = await fetch(`${webhookUrl}/webhook/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-API-Key': apiKey,
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

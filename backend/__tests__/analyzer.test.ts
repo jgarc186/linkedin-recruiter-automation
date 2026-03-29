@@ -47,16 +47,18 @@ describe('analyzer.ts', () => {
       expect(result.suggested_reply_type).toBe('lets_talk');
     });
 
-    it('should return medium confidence for general backend roles', () => {
+    it('should return moderate confidence for general backend roles without seniority', () => {
       const message = {
         ...baseMessage,
-        content: 'We have a Backend Engineer position available. Looking for distributed systems experience.',
+        sender: { ...baseMessage.sender, title: 'Technical Recruiter at TechCorp' }, // Neutral title without seniority
+        content: 'We have a Backend Engineer position available.',
       };
 
       const result = analyzeRole(message);
 
-      expect(result.confidence).toBeGreaterThan(0.3);
-      expect(result.confidence).toBeLessThan(0.7);
+      // Backend tech matches (0.3) but no seniority level specified
+      expect(result.confidence).toBe(0.3);
+      expect(result.reasons).toContain('Backend mentioned');
     });
 
     it('should return low confidence for frontend roles', () => {
@@ -118,14 +120,14 @@ describe('analyzer.ts', () => {
 
       const result = analyzeRole(message);
 
-      expect(result.reasons).toContain('Rust experience mentioned');
+      expect(result.reasons).toContain('Rust mentioned');
       expect(result.confidence).toBeGreaterThan(0);
     });
 
     it('should return tell_me_more for medium confidence', () => {
       const message = {
         ...baseMessage,
-        content: 'We have a senior backend role available with distributed systems work. Remote position.',
+        content: 'We have a senior backend role available. Remote position.',
       };
 
       const result = analyzeRole(message);
@@ -167,7 +169,7 @@ describe('analyzer.ts', () => {
 
       const result = analyzeRole(message);
 
-      expect(result.reasons).toContain('Location matches preference (Remote/Charlotte)');
+      expect(result.reasons).toContain('Location matches preference (Remote/Charlotte, NC)');
     });
 
     it('should use word-boundary matching for "go" to avoid false positives', () => {
@@ -179,7 +181,7 @@ describe('analyzer.ts', () => {
       const result = analyzeRole(message);
 
       // "go" appears as substring in "good" and "goals" but should NOT match
-      expect(result.reasons).not.toContain('Go experience mentioned');
+      expect(result.reasons).not.toContain('Go mentioned');
     });
 
     it('should match "go" as a standalone word', () => {
@@ -190,7 +192,7 @@ describe('analyzer.ts', () => {
 
       const result = analyzeRole(message);
 
-      expect(result.reasons).toContain('Go experience mentioned');
+      expect(result.reasons).toContain('Go mentioned');
     });
 
     it('should handle missing sender title gracefully', () => {
@@ -201,6 +203,107 @@ describe('analyzer.ts', () => {
       };
 
       expect(() => analyzeRole(message)).not.toThrow();
+    });
+  });
+
+  describe('analyzeRole with custom criteria', () => {
+    const baseMessage: MessageData = {
+      message_id: 'msg_123',
+      thread_id: 'thread_456',
+      sender: {
+        name: 'Jane Smith',
+        title: 'Senior Technical Recruiter',
+        company: 'TechCorp',
+      },
+      content: '',
+      timestamp: '2026-03-26T17:00:00Z',
+    };
+
+    it('should use custom tech stack', () => {
+      const message: MessageData = {
+        ...baseMessage,
+        content: 'We need a Python developer for our data pipeline.',
+        criteria: {
+          minSeniority: 'senior',
+          preferredTechStack: ['Python', 'Java'],
+          avoidKeywords: ['PHP'],
+          locations: ['Remote'],
+          minCompensation: 150000,
+        },
+      };
+
+      const result = analyzeRole(message);
+      expect(result.reasons).toContain('Python mentioned');
+    });
+
+    it('should use custom compensation threshold', () => {
+      const message: MessageData = {
+        ...baseMessage,
+        content: 'Senior role paying $160K.',
+        criteria: {
+          minSeniority: 'senior',
+          preferredTechStack: ['Python'],
+          avoidKeywords: [],
+          locations: ['Remote'],
+          minCompensation: 150000,
+        },
+      };
+
+      const result = analyzeRole(message);
+      expect(result.reasons).toContain('Compensation $160K meets threshold');
+    });
+
+    it('should use custom avoid keywords', () => {
+      const message: MessageData = {
+        ...baseMessage,
+        content: 'We need a COBOL developer.',
+        criteria: {
+          minSeniority: 'senior',
+          preferredTechStack: ['Python'],
+          avoidKeywords: ['COBOL'],
+          locations: ['Remote'],
+          minCompensation: 100000,
+        },
+      };
+
+      const result = analyzeRole(message);
+      expect(result.reasons).toContain('Contains non-preferred keywords');
+    });
+
+    it('should use custom locations', () => {
+      const message: MessageData = {
+        ...baseMessage,
+        content: 'Senior Python role in Austin, TX.',
+        criteria: {
+          minSeniority: 'senior',
+          preferredTechStack: ['Python'],
+          avoidKeywords: [],
+          locations: ['Austin'],
+          minCompensation: 100000,
+        },
+      };
+
+      const result = analyzeRole(message);
+      expect(result.reasons).toContain('Location matches preference (Austin)');
+    });
+
+    it('should cap tech stack score at 0.6', () => {
+      const message: MessageData = {
+        ...baseMessage,
+        sender: { name: 'Jane Smith', title: 'Recruiter', company: 'TechCorp' },
+        content: 'We need Python, Java, Ruby, and Elixir experience.',
+        criteria: {
+          minSeniority: 'principal',
+          preferredTechStack: ['Python', 'Java', 'Ruby', 'Elixir'],
+          avoidKeywords: [],
+          locations: [],
+          minCompensation: 0,
+        },
+      };
+
+      const result = analyzeRole(message);
+      // 4 techs * 0.3 = 1.2, but capped at 0.6
+      expect(result.confidence).toEqual(0.6);
     });
   });
 
@@ -255,6 +358,28 @@ describe('analyzer.ts', () => {
     it('should return generic reply for unknown choice', () => {
       const reply = draftReply('unknown_choice' as any, mockMessage);
       expect(reply).toBe('Thanks for reaching out!');
+    });
+
+    it('should use custom criteria in not_interested reply', () => {
+      const messageWithCriteria: MessageData = {
+        ...mockMessage,
+        criteria: {
+          minSeniority: 'staff',
+          preferredTechStack: ['Python', 'Java'],
+          avoidKeywords: [],
+          locations: [],
+          minCompensation: 150000,
+        },
+      };
+      const reply = draftReply('not_interested', messageWithCriteria);
+
+      expect(reply).toContain('Staff+ Engineer roles in Python/Java');
+    });
+
+    it('should use default criteria when none provided', () => {
+      const reply = draftReply('not_interested', mockMessage);
+
+      expect(reply).toContain('Senior+ Engineer roles in Go/Rust/Distributed Systems/Backend');
     });
   });
 });

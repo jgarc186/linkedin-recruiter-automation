@@ -38,6 +38,16 @@ const messageSchema = {
       },
       content: { type: 'string' },
       timestamp: { type: 'string' },
+      criteria: {
+        type: 'object',
+        properties: {
+          minSeniority: { type: 'string', enum: ['junior', 'mid', 'senior', 'staff', 'principal'] },
+          preferredTechStack: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          avoidKeywords: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          locations: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+          minCompensation: { type: 'number', minimum: 0 },
+        },
+      },
     },
   },
 };

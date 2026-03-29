@@ -5,12 +5,29 @@ export interface RecruiterProfile {
   email?: string;
 }
 
+export interface UserCriteria {
+  minSeniority: string;
+  preferredTechStack: string[];
+  avoidKeywords: string[];
+  locations: string[];
+  minCompensation: number;
+}
+
+export const DEFAULT_CRITERIA: UserCriteria = {
+  minSeniority: 'senior',
+  preferredTechStack: ['Go', 'Rust', 'Distributed Systems', 'Backend'],
+  avoidKeywords: ['PHP', 'WordPress', 'Staff Augmentation', 'Frontend-only', 'Frontend only', 'Consulting', 'Contract'],
+  locations: ['Remote', 'Charlotte, NC'],
+  minCompensation: 200000,
+};
+
 export interface MessageData {
   message_id: string;
   thread_id: string;
   sender: RecruiterProfile;
   content: string;
   timestamp: string;
+  criteria?: UserCriteria;
   extracted_data?: {
     role_title?: string;
     company?: string;
