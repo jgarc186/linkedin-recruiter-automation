@@ -11,6 +11,7 @@ vi.mock('../src/config.js', () => ({
     telegramUserId: '123456789',
     apiKey: 'test-api-key',
     telegramWebhookSecret: 'test-webhook-secret',
+    extensionId: 'test-extension-id',
     databasePath: ':memory:',
     googleClientId: 'test-client-id',
     googleClientSecret: 'test-client-secret',
@@ -580,5 +581,35 @@ describe('server.ts - createApp & start', () => {
   it('should export start function', async () => {
     const { start } = await import('../src/server.js');
     expect(typeof start).toBe('function');
+  });
+
+  describe('CORS', () => {
+    it('should allow requests from the configured extension ID', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { Origin: 'chrome-extension://test-extension-id' },
+      });
+      expect(response.headers['access-control-allow-origin']).toBe(
+        'chrome-extension://test-extension-id',
+      );
+      await app.close();
+    });
+
+    it('should not reflect a different extension ID as an allowed origin', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { Origin: 'chrome-extension://malicious-extension-id' },
+      });
+      expect(response.headers['access-control-allow-origin']).toBe(
+        'chrome-extension://test-extension-id',
+      );
+      await app.close();
+    });
   });
 });
