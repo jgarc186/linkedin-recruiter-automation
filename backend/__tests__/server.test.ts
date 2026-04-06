@@ -606,8 +606,8 @@ describe('server.ts - createApp & start', () => {
         url: '/health',
         headers: { Origin: 'chrome-extension://malicious-extension-id' },
       });
-      expect(response.headers['access-control-allow-origin']).not.toBe(
-        'chrome-extension://malicious-extension-id',
+      expect(response.headers['access-control-allow-origin']).toBe(
+        'chrome-extension://test-extension-id',
       );
       await app.close();
     });
