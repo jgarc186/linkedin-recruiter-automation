@@ -27,7 +27,7 @@ export async function createApp() {
   });
 
   await app.register(cors, {
-    origin: /^chrome-extension:\/\//,
+    origin: `chrome-extension://${config.extensionId}`,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'X-API-Key'],
   });
