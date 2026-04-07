@@ -516,6 +516,81 @@ describe('webhook routes', () => {
     });
   });
 
+  describe('payload content validation', () => {
+    const baseMessage = {
+      message_id: 'msg_123',
+      thread_id: 'thread_456',
+      sender: { name: 'Jane Smith', title: 'Senior Technical Recruiter', company: 'TechCorp' },
+      content: 'I have an opportunity for you',
+      timestamp: '2026-03-26T17:00:00Z',
+    };
+
+    const baseReply = {
+      message_id: 'msg_123',
+      drafted_reply: 'Hi, I would love to chat!',
+    };
+
+    it('should reject content exceeding 10,000 chars', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...baseMessage, content: 'x'.repeat(10001) },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject sender.name exceeding 100 chars', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...baseMessage, sender: { ...baseMessage.sender, name: 'a'.repeat(101) } },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject message_id exceeding 128 chars', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...baseMessage, message_id: 'x'.repeat(129) },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject drafted_reply exceeding 10,000 chars', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/reply',
+        payload: { ...baseReply, drafted_reply: 'x'.repeat(10001) },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should reject invalid user_choice value', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/reply',
+        payload: { ...baseReply, user_choice: 'invalid' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(400);
+    });
+
+    it('should accept content at exactly 10,000 chars', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...baseMessage, content: 'x'.repeat(10000) },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+  });
+
   describe('GET /webhook/pending-replies', () => {
     it('should return pending replies with valid API key', async () => {
       vi.mocked(getPendingReplies).mockReturnValueOnce([
@@ -581,6 +656,24 @@ describe('server.ts - createApp & start', () => {
   it('should export start function', async () => {
     const { start } = await import('../src/server.js');
     expect(typeof start).toBe('function');
+  });
+
+  describe('body size limit', () => {
+    it('should reject bodies exceeding 64KB with 413', async () => {
+      const { createApp } = await import('../src/server.js');
+      const testApp = await createApp();
+      const response = await testApp.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: JSON.stringify({ data: 'x'.repeat(65600) }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'test-api-key',
+        },
+      });
+      expect(response.statusCode).toBe(413);
+      await testApp.close();
+    });
   });
 
   describe('CORS', () => {

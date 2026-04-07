@@ -6,6 +6,7 @@ import { config, validateConfig } from './config.js';
 
 export async function createApp() {
   const app = Fastify({
+    bodyLimit: 65536,
     logger: {
       serializers: {
         req(request) {
