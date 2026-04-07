@@ -59,7 +59,7 @@ const replySchema = {
     properties: {
       message_id: { type: 'string', maxLength: 128 },
       thread_id: { type: 'string', maxLength: 128 },
-      user_choice: { type: 'string', maxLength: 50 },
+      user_choice: { type: 'string', enum: ['not_interested', 'tell_me_more', 'lets_talk'], maxLength: 50 },
       drafted_reply: { type: 'string', maxLength: 10000 },
     },
   },
