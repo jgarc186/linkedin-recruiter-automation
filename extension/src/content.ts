@@ -234,6 +234,6 @@ export function initContentScript(): void {
 }
 
 // Auto-initialize when injected as a content script
-if (typeof import.meta.env === 'undefined' || !import.meta.env.VITEST) {
+if (!import.meta.env.VITEST) {
   initContentScript();
 }

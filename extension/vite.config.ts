@@ -21,6 +21,9 @@ export default defineConfig({
         entryFileNames: '[name].js',
         chunkFileNames: '[name].js',
         assetFileNames: '[name].[ext]',
+        // Prevent code splitting — Chrome MV3 content scripts and
+        // service workers don't support cross-chunk ES module imports
+        manualChunks: {},
       },
     },
   },

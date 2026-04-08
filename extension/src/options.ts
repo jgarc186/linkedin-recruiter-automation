@@ -110,6 +110,6 @@ export async function initOptions(): Promise<void> {
   });
 }
 
-if (typeof import.meta.env === 'undefined' || !import.meta.env.VITEST) {
+if (!import.meta.env.VITEST) {
   initOptions();
 }
