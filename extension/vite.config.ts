@@ -17,13 +17,12 @@ export default defineConfig({
         background: resolve(__dirname, 'src/background.ts'),
         content: resolve(__dirname, 'src/content.ts'),
       },
+      // Chrome MV3 content scripts and service workers can't load
+      // cross-chunk ES module imports, so disable code splitting
+      preserveEntrySignatures: 'exports-only',
       output: {
         entryFileNames: '[name].js',
-        chunkFileNames: '[name].js',
         assetFileNames: '[name].[ext]',
-        // Prevent code splitting — Chrome MV3 content scripts and
-        // service workers don't support cross-chunk ES module imports
-        manualChunks: {},
       },
     },
   },
