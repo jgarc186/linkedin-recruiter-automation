@@ -110,7 +110,7 @@ export async function createEvent(
   const response = await calendar.events.insert({
     calendarId: 'primary',
     requestBody: event,
-    sendUpdates: 'all',
+    sendUpdates: event.attendees.length > 0 ? 'all' : 'none',
   });
 
   if (!response.data.id) {
@@ -138,7 +138,13 @@ Title: ${recruiter.title}
 Company: ${recruiter.company}
 
 Initial call to discuss the opportunity.
+
+[Calendar hold — awaiting reply via LinkedIn]
   `.trim();
+
+  if (suggestedTimes.length === 0) {
+    throw new Error('No suggested time slots available');
+  }
 
   // Use the first suggested time
   const startTime = suggestedTimes[0];

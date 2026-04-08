@@ -201,6 +201,14 @@ describe('calendar.ts', () => {
       });
     });
 
+    it('should use sendUpdates none when attendees array is empty', async () => {
+      await createEvent('Test', '2026-03-28T14:00:00Z', [], 'Test');
+
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({ sendUpdates: 'none' })
+      );
+    });
+
     it('should set OAuth2 credentials with refresh token', async () => {
       await createEvent('Test', '2026-03-28T14:00:00Z', [], 'Test');
 
@@ -303,6 +311,7 @@ describe('calendar.ts', () => {
       const callArgs = mockInsert.mock.calls[0][0];
       expect(callArgs.requestBody.description).toContain('Senior Technical Recruiter');
       expect(callArgs.requestBody.description).toContain('TechCorp');
+      expect(callArgs.requestBody.description).toContain('[Calendar hold — awaiting reply via LinkedIn]');
     });
 
     it('should not pass attendee emails (no recruiter email available)', async () => {
@@ -316,6 +325,12 @@ describe('calendar.ts', () => {
             attendees: [],
           }),
         })
+      );
+    });
+
+    it('should throw when no suggested time slots are provided', async () => {
+      await expect(scheduleMeeting(mockRecruiter, [])).rejects.toThrow(
+        'No suggested time slots available'
       );
     });
 
