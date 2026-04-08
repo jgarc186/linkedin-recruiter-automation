@@ -71,12 +71,17 @@ cd backend
 npm run dev
 ```
 
-### 4. Load Extension
+### 4. Build & Load Extension
+
+```bash
+cd extension
+npm run build
+```
 
 1. Open Chrome → `chrome://extensions/`
 2. Enable "Developer mode"
 3. Click "Load unpacked"
-4. Select `extension/` folder
+4. Select `extension/dist/` folder (not `extension/` directly — Chrome rejects `__tests__/` directories)
 
 ### 5. Configure Extension
 

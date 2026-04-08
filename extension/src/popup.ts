@@ -50,3 +50,7 @@ export async function initPopup(): Promise<void> {
   }
   if (pendingEl) pendingEl.textContent = String(pendingCount);
 }
+
+if (typeof import.meta.env === 'undefined' || !import.meta.env.VITEST) {
+  initPopup();
+}
