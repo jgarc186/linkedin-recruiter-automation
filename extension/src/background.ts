@@ -232,4 +232,5 @@ if (typeof chrome !== 'undefined' && chrome.alarms) {
   chrome.alarms.onAlarm.addListener(onAlarmHandler);
   chrome.runtime.onMessage.addListener(onMessageHandler);
   chrome.runtime.onMessageExternal?.addListener(onExternalMessageHandler);
+  maintainConnection();
 }

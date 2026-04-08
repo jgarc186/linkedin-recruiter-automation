@@ -232,3 +232,8 @@ export function initContentScript(): void {
     handleReplyMessage(message);
   });
 }
+
+// Auto-initialize when injected as a content script
+if (!import.meta.env.VITEST) {
+  initContentScript();
+}
