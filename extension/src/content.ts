@@ -1,5 +1,40 @@
 import type { MessageData } from '../../shared/types';
 
+// Fallback selector chains — each array is tried in order; first match wins.
+// Prefer data-* attributes over class names where available (class names change; data attrs are stable).
+export const SELECTORS = {
+  container:    ['#msg-conversations-container', '[data-view-name="messaging-thread-container"]', '.msg-overlay-list-bubble'],
+  messageGroup: ['.msg-s-message-group', '[data-thread-id]', '.msg-s-event-listitem'],
+  senderName:   ['.msg-s-message-group__name', '[data-sender-name]', '.msg-s-profile-card__name'],
+  senderTitle:  ['.msg-s-message-group__title', '[data-sender-title]', '.msg-s-profile-card__headline'],
+  messageBody:  ['.msg-s-event-listitem__body', '[data-message-body]', '.msg-s-event__body'],
+  messageInput: ['.msg-form__contenteditable', '[data-placeholder][contenteditable]', '.msg-form__message-texteditor [contenteditable]'],
+};
+
+export function queryFirst(root: Element | Document, selectors: string[]): Element | null {
+  for (let i = 0; i < selectors.length; i++) {
+    const el = root.querySelector(selectors[i]);
+    if (el) {
+      if (i > 0) console.warn(`[LRA] Primary selector failed, using fallback: ${selectors[i]}`);
+      return el;
+    }
+  }
+  console.error(`[LRA] All selectors failed: ${selectors.join(', ')}`);
+  return null;
+}
+
+export function queryAll(root: Element | Document, selectors: string[]): Element[] {
+  for (let i = 0; i < selectors.length; i++) {
+    const els = Array.from(root.querySelectorAll(selectors[i]));
+    if (els.length > 0) {
+      if (i > 0) console.warn(`[LRA] Primary selector failed, using fallback: ${selectors[i]}`);
+      return els;
+    }
+  }
+  console.error(`[LRA] All selectors failed: ${selectors.join(', ')}`);
+  return [];
+}
+
 // Base recruiter keywords — shared with backend via shared/constants.ts
 export const RECRUITER_KEYWORDS = [
   'opportunity',
@@ -44,11 +79,11 @@ export function extractMessageData(element: Element, messageId: string): Message
   const threadId = element.getAttribute('data-thread-id') || 'unknown';
 
   // Try to find name
-  const nameElement = element.querySelector('.msg-s-message-group__name');
+  const nameElement = queryFirst(element, SELECTORS.senderName);
   const name = nameElement?.textContent?.trim() || 'Unknown';
 
   // Try to find title
-  const titleElement = element.querySelector('.msg-s-message-group__title');
+  const titleElement = queryFirst(element, SELECTORS.senderTitle);
   const titleText = titleElement?.textContent?.trim() || 'Unknown';
 
   // Extract company from title (e.g., "Senior Technical Recruiter at TechCorp")
@@ -56,7 +91,7 @@ export function extractMessageData(element: Element, messageId: string): Message
   const company = companyMatch ? companyMatch[1].trim() : 'Unknown';
 
   // Try to find message content
-  const bodyElement = element.querySelector('.msg-s-event-listitem__body');
+  const bodyElement = queryFirst(element, SELECTORS.messageBody);
   const content = bodyElement?.textContent?.trim() || '';
 
   return {
@@ -73,10 +108,10 @@ export function extractMessageData(element: Element, messageId: string): Message
 }
 
 export function detectNewMessages(): MessageData[] {
-  const container = document.getElementById('msg-conversations-container');
+  const container = queryFirst(document, SELECTORS.container);
   if (!container) return [];
 
-  const messageGroups = container.querySelectorAll('.msg-s-message-group');
+  const messageGroups = queryAll(container, SELECTORS.messageGroup);
   const newMessages: MessageData[] = [];
 
   messageGroups.forEach((group, index) => {
@@ -84,7 +119,7 @@ export function detectNewMessages(): MessageData[] {
 
     if (processedMessages.has(threadId)) return;
 
-    const bodyElement = group.querySelector('.msg-s-event-listitem__body');
+    const bodyElement = queryFirst(group, SELECTORS.messageBody);
     const content = bodyElement?.textContent?.trim() || '';
 
     if (isRecruiterMessage(content)) {
@@ -112,7 +147,7 @@ function safeSelector(attr: string, value: string): string {
 }
 
 export function injectReplyButton(threadId: string, reply: string): void {
-  const container = document.getElementById('msg-conversations-container');
+  const container = queryFirst(document, SELECTORS.container);
   if (!container) return;
 
   const threadEl = container.querySelector(safeSelector('data-thread-id', threadId));
@@ -156,9 +191,9 @@ export function injectReplyButton(threadId: string, reply: string): void {
 }
 
 export function sendReply(threadId: string, text: string): void {
-  const input = document.querySelector(
-    `.msg-form__contenteditable${safeSelector('data-thread-id', threadId)}`
-  ) as HTMLElement | null;
+  const threadSelector = safeSelector('data-thread-id', threadId);
+  const inputSelectors = SELECTORS.messageInput.map(s => `${s}${threadSelector}`);
+  const input = queryFirst(document, inputSelectors) as HTMLElement | null;
 
   if (!input) return;
 
@@ -216,7 +251,7 @@ export function initContentScript(): void {
   detectNewMessages();
 
   // Set up MutationObserver for dynamic message detection
-  const container = document.getElementById('msg-conversations-container') || document.body;
+  const container = queryFirst(document, SELECTORS.container) || document.body;
 
   observer = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
