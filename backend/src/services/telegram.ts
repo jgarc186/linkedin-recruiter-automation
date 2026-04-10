@@ -69,7 +69,6 @@ export async function sendApprovalRequest(
 *Message:*
 ${escapeTelegramMarkdownV2(truncatedContent)}
 
-
 _Reply with an option below:_
   `.trim();
 
@@ -98,25 +97,21 @@ export async function handleCallbackQuery(
       action: (ACTION_CODES[raw.a] || raw.action || raw.a) as TelegramCallbackData['action'],
     };
 
-    // Edit the original message to show the user's choice
-       if (query.message?.chat?.id && query.message?.message_id) {
+    // Keep original message formatting intact and send a separate confirmation.
+    if (query.message?.chat?.id != null && query.message?.message_id != null) {
       const choiceEmoji = {
         not_interested: '❌',
         tell_me_more: '🤔',
         lets_talk: '✅',
       }[callbackData.action];
 
-        const originalText = escapeTelegramMarkdownV2(query.message.text || '');
-        const selectedAction = escapeTelegramMarkdownV2(callbackData.action.replace(/_/g, ' '));
+      const selectedAction = escapeTelegramMarkdownV2(callbackData.action.replace(/_/g, ' '));
 
-        await getBot().editMessageText(
-          `${originalText}\n\n${choiceEmoji} *You selected:* ${selectedAction}`,
-          {
-            chat_id: query.message.chat.id,
-            message_id: query.message.message_id,
-            parse_mode: 'MarkdownV2',
-          }
-        );
+      await getBot().sendMessage(
+        String(query.message.chat.id),
+        `${choiceEmoji} *You selected:* ${selectedAction}`,
+        { parse_mode: 'MarkdownV2' }
+      );
     }
 
     return callbackData;

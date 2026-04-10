@@ -88,6 +88,7 @@ describe('telegram.ts', () => {
       const options = mockBot.sendMessage.mock.calls[0][2];
       expect(options.reply_markup).toBeDefined();
       expect(options.reply_markup.inline_keyboard).toHaveLength(1);
+      expect(options.parse_mode).toBe('MarkdownV2');
     });
 
     it('should throw when sendMessage fails', async () => {
@@ -108,11 +109,11 @@ describe('telegram.ts', () => {
       expect(callArgs[1]).toContain('...');
     });
 
-    it('should escape Markdown special characters in user content', async () => {
+    it('should escape MarkdownV2 special characters in user content', async () => {
       const markdownMessage: MessageData = {
         ...mockMessage,
         sender: {
-          name: 'Jane *Bold* Smith',
+          name: '_ * [ ] ( ) ~ ` > # + - = | { } . ! \\',
           title: 'Senior _Italic_ Recruiter',
           company: 'Tech[Corp]',
         },
@@ -120,10 +121,15 @@ describe('telegram.ts', () => {
 
       await sendApprovalRequest(markdownMessage, mockUserId);
 
-      const callArgs = mockBot.sendMessage.mock.calls[0];
-      expect(callArgs[1]).toContain('Jane \\*Bold\\* Smith');
-      expect(callArgs[1]).toContain('Senior \\_Italic\\_ Recruiter');
-      expect(callArgs[1]).toContain('Tech\\[Corp\\]');
+      const text = mockBot.sendMessage.mock.calls[0][1];
+      const expectedEscapedChars = ['\\_', '\\*', '\\[', '\\]', '\\(', '\\)', '\\~', '\\`', '\\>', '\\#', '\\+', '\\-', '\\=', '\\|', '\\{', '\\}', '\\.', '\\!', '\\\\'];
+
+      expectedEscapedChars.forEach(char => {
+        expect(text).toContain(char);
+      });
+
+      expect(text).toContain('Senior \\_Italic\\_ Recruiter');
+      expect(text).toContain('Tech\\[Corp\\]');
     });
   });
 
@@ -165,7 +171,7 @@ describe('telegram.ts', () => {
       await expect(handleCallbackQuery(invalidQuery as any)).rejects.toThrow('Invalid callback data format');
     });
 
-    it('should handle callback without message (no edit)', async () => {
+    it('should handle callback without message (no confirmation)', async () => {
       const queryNoMessage = {
         id: 'callback_456',
         from: { id: 123456789, first_name: 'Test' },
@@ -176,6 +182,18 @@ describe('telegram.ts', () => {
       expect(result.message_id).toBe('msg_123');
       expect(result.action).toBe('not_interested');
       expect(mockBot.editMessageText).not.toHaveBeenCalled();
+      expect(mockBot.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('should send a separate confirmation message in MarkdownV2', async () => {
+      await handleCallbackQuery(mockQuery as any);
+
+      expect(mockBot.editMessageText).not.toHaveBeenCalled();
+      expect(mockBot.sendMessage).toHaveBeenCalledWith(
+        '123456789',
+        expect.stringContaining('*You selected:*'),
+        { parse_mode: 'MarkdownV2' }
+      );
     });
 
     it('should replace all underscores in action display text', async () => {
@@ -187,9 +205,20 @@ describe('telegram.ts', () => {
 
       await handleCallbackQuery(tellMoreQuery as any);
 
-      const editCallArgs = mockBot.editMessageText.mock.calls[0];
-      expect(editCallArgs[0]).toContain('tell me more');
-      expect(editCallArgs[0]).not.toContain('tell_me_more');
+      const sendCallArgs = mockBot.sendMessage.mock.calls[0];
+      expect(sendCallArgs[1]).toContain('tell me more');
+      expect(sendCallArgs[1]).not.toContain('tell_me_more');
+    });
+
+    it('should allow message_id = 0 with non-null checks', async () => {
+      const zeroMessageIdQuery = {
+        ...mockQuery,
+        message: { chat: { id: 123456789 }, message_id: 0, text: 'Original message' },
+      };
+
+      await handleCallbackQuery(zeroMessageIdQuery as any);
+
+      expect(mockBot.sendMessage).toHaveBeenCalled();
     });
   });
 });
