@@ -22,8 +22,8 @@ export function __testSetMockBot(mockBot: TelegramBot): void {
   bot = mockBot as TelegramBot;
 }
 
-function escapeMarkdown(text: string): string {
-  return text.replace(/([*_`\[\]])/g, '\\$1');
+function escapeTelegramMarkdownV2(text: string): string {
+  return text.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
 }
 
 // Short action codes for Telegram's 64-byte callback_data limit
@@ -57,22 +57,24 @@ export async function sendApprovalRequest(
   userId: string
 ): Promise<void> {
   const { sender, content } = messageData;
+  const truncatedContent = content.length > 500 ? `${content.substring(0, 500)}...` : content;
 
   const text = `
 📬 *New Recruiter Message*
 
-*From:* ${escapeMarkdown(sender.name)}
-*Title:* ${escapeMarkdown(sender.title)}
-*Company:* ${escapeMarkdown(sender.company)}
+*From:* ${escapeTelegramMarkdownV2(sender.name)}
+*Title:* ${escapeTelegramMarkdownV2(sender.title)}
+*Company:* ${escapeTelegramMarkdownV2(sender.company)}
 
 *Message:*
-${escapeMarkdown(content.substring(0, 500))}${content.length > 500 ? '...' : ''}
+${escapeTelegramMarkdownV2(truncatedContent)}
+
 
 _Reply with an option below:_
   `.trim();
 
   await getBot().sendMessage(userId, text, {
-    parse_mode: 'Markdown',
+    parse_mode: 'MarkdownV2',
     reply_markup: {
       inline_keyboard: createInlineKeyboard(messageData.message_id),
     },
@@ -97,21 +99,24 @@ export async function handleCallbackQuery(
     };
 
     // Edit the original message to show the user's choice
-    if (query.message) {
+       if (query.message?.chat?.id && query.message?.message_id) {
       const choiceEmoji = {
         not_interested: '❌',
         tell_me_more: '🤔',
         lets_talk: '✅',
       }[callbackData.action];
 
-      await getBot().editMessageText(
-        `${query.message.text}\n\n${choiceEmoji} *You selected:* ${callbackData.action.replace(/_/g, ' ')}`,
-        {
-          chat_id: query.message.chat.id,
-          message_id: query.message.message_id,
-          parse_mode: 'Markdown',
-        }
-      );
+        const originalText = escapeTelegramMarkdownV2(query.message.text || '');
+        const selectedAction = escapeTelegramMarkdownV2(callbackData.action.replace(/_/g, ' '));
+
+        await getBot().editMessageText(
+          `${originalText}\n\n${choiceEmoji} *You selected:* ${selectedAction}`,
+          {
+            chat_id: query.message.chat.id,
+            message_id: query.message.message_id,
+            parse_mode: 'MarkdownV2',
+          }
+        );
     }
 
     return callbackData;
