@@ -108,9 +108,17 @@ export async function handleCallbackQuery(
       const selectedAction = escapeTelegramMarkdownV2(callbackData.action.replace(/_/g, ' '));
 
       await getBot().sendMessage(
-        String(query.message.chat.id),
+        query.message.chat.id,
         `${choiceEmoji} *You selected:* ${selectedAction}`,
         { parse_mode: 'MarkdownV2' }
+      );
+
+      await getBot().editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        {
+          chat_id: query.message.chat.id,
+          message_id: query.message.message_id,
+        }
       );
     }
 

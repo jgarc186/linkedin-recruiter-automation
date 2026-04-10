@@ -17,6 +17,7 @@ describe('telegram.ts', () => {
       sendMessage: vi.fn().mockResolvedValue({ message_id: 999 }),
       answerCallbackQuery: vi.fn().mockResolvedValue(true),
       editMessageText: vi.fn().mockResolvedValue({ message_id: 999 }),
+      editMessageReplyMarkup: vi.fn().mockResolvedValue({ message_id: 999 }),
     };
     __testSetMockBot(mockBot);
   });
@@ -106,7 +107,7 @@ describe('telegram.ts', () => {
       await sendApprovalRequest(longMessage, mockUserId);
 
       const callArgs = mockBot.sendMessage.mock.calls[0];
-      expect(callArgs[1]).toContain('...');
+      expect(callArgs[1]).toContain('\\.\\.\\.');
     });
 
     it('should escape MarkdownV2 special characters in user content', async () => {
@@ -183,6 +184,7 @@ describe('telegram.ts', () => {
       expect(result.action).toBe('not_interested');
       expect(mockBot.editMessageText).not.toHaveBeenCalled();
       expect(mockBot.sendMessage).not.toHaveBeenCalled();
+      expect(mockBot.editMessageReplyMarkup).not.toHaveBeenCalled();
     });
 
     it('should send a separate confirmation message in MarkdownV2', async () => {
@@ -190,9 +192,13 @@ describe('telegram.ts', () => {
 
       expect(mockBot.editMessageText).not.toHaveBeenCalled();
       expect(mockBot.sendMessage).toHaveBeenCalledWith(
-        '123456789',
+        123456789,
         expect.stringContaining('*You selected:*'),
         { parse_mode: 'MarkdownV2' }
+      );
+      expect(mockBot.editMessageReplyMarkup).toHaveBeenCalledWith(
+        { inline_keyboard: [] },
+        { chat_id: 123456789, message_id: 999 }
       );
     });
 
@@ -219,6 +225,10 @@ describe('telegram.ts', () => {
       await handleCallbackQuery(zeroMessageIdQuery as any);
 
       expect(mockBot.sendMessage).toHaveBeenCalled();
+      expect(mockBot.editMessageReplyMarkup).toHaveBeenCalledWith(
+        { inline_keyboard: [] },
+        { chat_id: 123456789, message_id: 0 }
+      );
     });
   });
 });
