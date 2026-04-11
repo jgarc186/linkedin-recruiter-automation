@@ -501,7 +501,6 @@ describe('background.ts', () => {
       };
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
-        onMessageExternal: { addListener: vi.fn() },
       };
       (global as any).chrome = { runtime: mockRuntime, alarms: mockAlarms };
 
@@ -550,7 +549,6 @@ describe('background.ts', () => {
 
       expect(result).toBe(false);
     });
-
   });
 
   describe('pollPendingReplies', () => {
@@ -667,7 +665,6 @@ describe('background.ts', () => {
       };
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
-        onMessageExternal: { addListener: vi.fn() },
       };
       (global as any).chrome = { runtime: mockRuntime, alarms: mockAlarms };
 
