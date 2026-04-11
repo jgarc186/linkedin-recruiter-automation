@@ -6,10 +6,8 @@ import {
   getConfig,
   pollPendingReplies,
   processPendingSends,
-  __testSetAllowedSenders,
   __testOnAlarmHandler,
   __testOnMessageHandler,
-  __testOnExternalMessageHandler,
 } from '../src/background';
 import type { MessageData } from '../../shared/types';
 
@@ -503,7 +501,6 @@ describe('background.ts', () => {
       };
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
-        onMessageExternal: { addListener: vi.fn() },
       };
       (global as any).chrome = { runtime: mockRuntime, alarms: mockAlarms };
 
@@ -551,49 +548,6 @@ describe('background.ts', () => {
       const result = __testOnMessageHandler({ type: 'UNKNOWN' }, {}, sendResponse);
 
       expect(result).toBe(false);
-    });
-
-    it('should reject external messages when allowlist is empty', async () => {
-      const mockStorage = { set: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({}) };
-      const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
-      (global as any).chrome = {
-        storage: { local: mockStorage },
-        tabs: mockTabs,
-      };
-
-      // Send from an unknown extension — should be rejected since allowlist is empty
-      __testOnExternalMessageHandler({
-        type: 'DRAFTED_REPLY',
-        data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
-      }, { id: 'unknown-extension-id' });
-
-      // Wait a tick and verify storage was NOT called
-      await vi.advanceTimersByTimeAsync(100);
-      expect(mockStorage.set).not.toHaveBeenCalled();
-    });
-
-    it('should handle DRAFTED_REPLY from allowed external sender', async () => {
-      // Temporarily allow a specific sender
-      __testSetAllowedSenders(['allowed-extension-id']);
-
-      const mockStorage = { set: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue({}) };
-      const mockTabs = { query: vi.fn().mockResolvedValue([]), sendMessage: vi.fn() };
-      (global as any).chrome = {
-        storage: { local: mockStorage },
-        tabs: mockTabs,
-      };
-
-      __testOnExternalMessageHandler({
-        type: 'DRAFTED_REPLY',
-        data: { message_id: 'msg_1', thread_id: 't_1', drafted_reply: 'Hello', user_choice: 'lets_talk' },
-      }, { id: 'allowed-extension-id' });
-
-      await vi.waitFor(() => {
-        expect(mockStorage.set).toHaveBeenCalled();
-      });
-
-      // Reset allowlist
-      __testSetAllowedSenders([]);
     });
   });
 
@@ -711,7 +665,6 @@ describe('background.ts', () => {
       };
       const mockRuntime = {
         onMessage: { addListener: vi.fn() },
-        onMessageExternal: { addListener: vi.fn() },
       };
       (global as any).chrome = { runtime: mockRuntime, alarms: mockAlarms };
 
