@@ -155,6 +155,41 @@ describe('options.ts', () => {
 
       await expect(saveSettings(DEFAULT_SETTINGS)).rejects.toThrow('Storage full');
     });
+
+    it('should rollback local settings when session write fails', async () => {
+      const previousLocal = {
+        webhookUrl: 'http://old:8000',
+        criteria: DEFAULT_SETTINGS.criteria,
+      };
+      const previousApiKey = 'old-key';
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn()
+        .mockRejectedValueOnce(new Error('Session write failed'))
+        .mockResolvedValueOnce(undefined);
+
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValue({ settings: previousLocal }),
+        sessionGet: vi.fn().mockResolvedValue({ apiKey: previousApiKey }),
+        localSet,
+        sessionSet,
+      });
+
+      await expect(saveSettings({
+        ...DEFAULT_SETTINGS,
+        webhookUrl: 'http://new:9000',
+        apiKey: 'new-key',
+      })).rejects.toThrow('Session write failed');
+
+      expect(localSet).toHaveBeenNthCalledWith(1, {
+        settings: {
+          webhookUrl: 'http://new:9000',
+          criteria: DEFAULT_SETTINGS.criteria,
+        },
+      });
+      expect(localSet).toHaveBeenNthCalledWith(2, {
+        settings: previousLocal,
+      });
+    });
   });
 
   describe('initOptions', () => {

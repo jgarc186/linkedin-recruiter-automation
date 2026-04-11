@@ -1,5 +1,6 @@
 import type { UserCriteria } from '../../shared/types';
 import { DEFAULT_CRITERIA } from '../../shared/types';
+import { loadStorageConfig, saveStorageConfig, DEFAULT_WEBHOOK_URL } from './storageConfig';
 
 export type { UserCriteria };
 
@@ -10,46 +11,18 @@ export interface ExtensionSettings {
 }
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  webhookUrl: 'http://localhost:8000',
+  webhookUrl: DEFAULT_WEBHOOK_URL,
   apiKey: '',
   criteria: DEFAULT_CRITERIA,
 };
 
-const SETTINGS_KEY = 'settings';
-const API_KEY_KEY = 'apiKey';
-
 export async function loadSettings(): Promise<ExtensionSettings> {
   try {
-    const [localData, sessionData] = await Promise.all([
-      chrome.storage.local.get(SETTINGS_KEY),
-      chrome.storage.session.get(API_KEY_KEY),
-    ]);
-
-    const storedSettings = localData[SETTINGS_KEY] || {};
-    const webhookUrl = storedSettings.webhookUrl || DEFAULT_SETTINGS.webhookUrl;
-    const criteria = storedSettings.criteria || DEFAULT_SETTINGS.criteria;
-
-    const sessionApiKey = sessionData[API_KEY_KEY];
-    const legacyApiKey = storedSettings.apiKey;
-    const apiKey = sessionApiKey || legacyApiKey || DEFAULT_SETTINGS.apiKey;
-
-    // Backward-compatible migration from insecure local settings.apiKey to session storage.
-    if (!sessionApiKey && legacyApiKey) {
-      await Promise.all([
-        chrome.storage.session.set({ [API_KEY_KEY]: legacyApiKey }),
-        chrome.storage.local.set({
-          [SETTINGS_KEY]: {
-            webhookUrl,
-            criteria,
-          },
-        }),
-      ]);
-    }
-
+    const { webhookUrl, apiKey, criteria } = await loadStorageConfig();
     return {
       webhookUrl,
       apiKey,
-      criteria,
+      criteria: criteria || DEFAULT_SETTINGS.criteria,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -57,15 +30,7 @@ export async function loadSettings(): Promise<ExtensionSettings> {
 }
 
 export async function saveSettings(settings: ExtensionSettings): Promise<void> {
-  await Promise.all([
-    chrome.storage.local.set({
-      [SETTINGS_KEY]: {
-        webhookUrl: settings.webhookUrl,
-        criteria: settings.criteria,
-      },
-    }),
-    chrome.storage.session.set({ [API_KEY_KEY]: settings.apiKey }),
-  ]);
+  await saveStorageConfig(settings);
 }
 
 function parseCommaSeparated(value: string): string[] {
@@ -107,6 +72,9 @@ export async function initOptions(): Promise<void> {
   avoidKeywordsInput.value = settings.criteria.avoidKeywords.join(', ');
   locationsInput.value = settings.criteria.locations.join(', ');
   minCompensationInput.value = String(settings.criteria.minCompensation);
+  if (saveStatusEl && !settings.apiKey) {
+    saveStatusEl.textContent = 'API key is session-only and clears when the browser closes. Re-enter it after restart.';
+  }
 
   // Handle form submit
   const form = document.getElementById('options-form') as HTMLFormElement;

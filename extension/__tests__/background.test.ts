@@ -273,6 +273,21 @@ describe('background.ts', () => {
       const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(requestBody.criteria).toBeUndefined();
     });
+
+    it('should not send webhook when API key is missing', async () => {
+      const mockAction = {
+        setBadgeText: vi.fn(),
+        setBadgeBackgroundColor: vi.fn(),
+        setTitle: vi.fn(),
+      };
+      (global as any).chrome.action = mockAction;
+      (global as any).chrome.storage.session.get = vi.fn().mockResolvedValue({ apiKey: '' });
+
+      await handleWebhookSend(mockMessage);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAction.setBadgeText).toHaveBeenCalledWith({ text: 'KEY!' });
+    });
   });
 
   describe('processPendingSends', () => {
@@ -508,7 +523,7 @@ describe('background.ts', () => {
             set: vi.fn().mockResolvedValue(undefined),
           },
           session: {
-            get: vi.fn().mockResolvedValue({ apiKey: '' }),
+            get: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
             set: vi.fn().mockResolvedValue(undefined),
           },
         },
@@ -642,6 +657,33 @@ describe('background.ts', () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
       await expect(pollPendingReplies()).resolves.not.toThrow();
+    });
+
+    it('should not fetch pending replies when API key is missing', async () => {
+      const mockAction = {
+        setBadgeText: vi.fn(),
+        setBadgeBackgroundColor: vi.fn(),
+        setTitle: vi.fn(),
+      };
+      (global as any).chrome = {
+        action: mockAction,
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({
+              settings: { webhookUrl: 'http://localhost:8000' },
+            }),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({ apiKey: '' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await pollPendingReplies();
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAction.setBadgeText).toHaveBeenCalledWith({ text: 'KEY!' });
     });
 
     it('should call processPendingSends on keepAlive alarm', async () => {

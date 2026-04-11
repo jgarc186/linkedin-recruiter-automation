@@ -1,9 +1,9 @@
 import type { MessageData, WebhookReplyPayload, UserCriteria } from '../../shared/types';
+import { loadStorageConfig, DEFAULT_WEBHOOK_URL } from './storageConfig';
 
 const PENDING_SENDS_KEY = 'pending_sends';
 const PENDING_SEND_TTL_MS = 24 * 60 * 60 * 1000;
-const SETTINGS_KEY = 'settings';
-const API_KEY_KEY = 'apiKey';
+const MISSING_API_KEY_BADGE_TEXT = 'KEY!';
 
 interface PendingSend {
   id: string;
@@ -12,38 +12,35 @@ interface PendingSend {
   attempts: number;
 }
 
+let hasWarnedMissingApiKey = false;
+
+function markMissingApiKey(): void {
+  if (!hasWarnedMissingApiKey) {
+    console.warn('API key is missing. Open extension options and set it for this browser session.');
+    hasWarnedMissingApiKey = true;
+  }
+
+  if (chrome.action) {
+    chrome.action.setBadgeText({ text: MISSING_API_KEY_BADGE_TEXT });
+    chrome.action.setBadgeBackgroundColor({ color: '#B91C1C' });
+    chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin: API key missing. Open options to set it.' });
+  }
+}
+
+function clearMissingApiKeyState(): void {
+  hasWarnedMissingApiKey = false;
+  if (chrome.action) {
+    chrome.action.setBadgeText({ text: '' });
+    chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin' });
+  }
+}
+
 export async function getConfig(): Promise<{ webhookUrl: string; apiKey: string; criteria?: UserCriteria }> {
   try {
-    const [localData, sessionData] = await Promise.all([
-      chrome.storage.local.get(SETTINGS_KEY),
-      chrome.storage.session.get(API_KEY_KEY),
-    ]);
-    const settings = localData[SETTINGS_KEY] || {};
-    const sessionApiKey = sessionData[API_KEY_KEY];
-    const legacyApiKey = settings.apiKey;
-    const apiKey = sessionApiKey || legacyApiKey || '';
-
-    // Backward-compatible migration from insecure local settings.apiKey to session storage.
-    if (!sessionApiKey && legacyApiKey) {
-      await Promise.all([
-        chrome.storage.session.set({ [API_KEY_KEY]: legacyApiKey }),
-        chrome.storage.local.set({
-          [SETTINGS_KEY]: {
-            webhookUrl: settings.webhookUrl || 'http://localhost:8000',
-            criteria: settings.criteria,
-          },
-        }),
-      ]);
-    }
-
-    return {
-      webhookUrl: settings.webhookUrl || 'http://localhost:8000',
-      apiKey,
-      criteria: settings.criteria,
-    };
+    return await loadStorageConfig();
   } catch {
     return {
-      webhookUrl: 'http://localhost:8000',
+      webhookUrl: DEFAULT_WEBHOOK_URL,
       apiKey: '',
     };
   }
@@ -82,6 +79,12 @@ export async function handleWebhookSend(data: MessageData): Promise<void> {
   const id = await enqueuePendingSend(data);
   try {
     const { webhookUrl, apiKey, criteria } = await getConfig();
+    if (!apiKey.trim()) {
+      markMissingApiKey();
+      return;
+    }
+    clearMissingApiKeyState();
+
     const payload = criteria ? { ...data, criteria } : data;
     const response = await fetch(`${webhookUrl}/webhook/message`, {
       method: 'POST',
@@ -106,13 +109,20 @@ export async function handleWebhookSend(data: MessageData): Promise<void> {
 export async function processPendingSends(): Promise<void> {
   const pending = await loadPendingSends();
   const now = Date.now();
+  const nonStalePending = pending.filter(entry => now - entry.enqueuedAt <= PENDING_SEND_TTL_MS);
+
+  const { webhookUrl, apiKey, criteria } = await getConfig();
+  if (!apiKey.trim()) {
+    markMissingApiKey();
+    await chrome.storage.local.set({ [PENDING_SENDS_KEY]: nonStalePending });
+    return;
+  }
+  clearMissingApiKeyState();
+
   const stillPending: PendingSend[] = [];
 
-  for (const entry of pending) {
-    if (now - entry.enqueuedAt > PENDING_SEND_TTL_MS) continue; // prune stale
-
+  for (const entry of nonStalePending) {
     try {
-      const { webhookUrl, apiKey, criteria } = await getConfig();
       const payload = criteria ? { ...entry.data, criteria } : entry.data;
       const response = await fetch(`${webhookUrl}/webhook/message`, {
         method: 'POST',
@@ -172,6 +182,12 @@ export async function handleWebhookResponse(response: WebhookReplyPayload): Prom
 export async function pollPendingReplies(): Promise<void> {
   try {
     const { webhookUrl, apiKey } = await getConfig();
+    if (!apiKey.trim()) {
+      markMissingApiKey();
+      return;
+    }
+    clearMissingApiKeyState();
+
     const response = await fetch(`${webhookUrl}/webhook/pending-replies`, {
       headers: {
         'X-API-Key': apiKey,
