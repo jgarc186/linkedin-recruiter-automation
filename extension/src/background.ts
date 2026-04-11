@@ -2,6 +2,8 @@ import type { MessageData, WebhookReplyPayload, UserCriteria } from '../../share
 
 const PENDING_SENDS_KEY = 'pending_sends';
 const PENDING_SEND_TTL_MS = 24 * 60 * 60 * 1000;
+const SETTINGS_KEY = 'settings';
+const API_KEY_KEY = 'apiKey';
 
 interface PendingSend {
   id: string;
@@ -12,11 +14,31 @@ interface PendingSend {
 
 export async function getConfig(): Promise<{ webhookUrl: string; apiKey: string; criteria?: UserCriteria }> {
   try {
-    const data = await chrome.storage.local.get('settings');
-    const settings = data.settings || {};
+    const [localData, sessionData] = await Promise.all([
+      chrome.storage.local.get(SETTINGS_KEY),
+      chrome.storage.session.get(API_KEY_KEY),
+    ]);
+    const settings = localData[SETTINGS_KEY] || {};
+    const sessionApiKey = sessionData[API_KEY_KEY];
+    const legacyApiKey = settings.apiKey;
+    const apiKey = sessionApiKey || legacyApiKey || '';
+
+    // Backward-compatible migration from insecure local settings.apiKey to session storage.
+    if (!sessionApiKey && legacyApiKey) {
+      await Promise.all([
+        chrome.storage.session.set({ [API_KEY_KEY]: legacyApiKey }),
+        chrome.storage.local.set({
+          [SETTINGS_KEY]: {
+            webhookUrl: settings.webhookUrl || 'http://localhost:8000',
+            criteria: settings.criteria,
+          },
+        }),
+      ]);
+    }
+
     return {
       webhookUrl: settings.webhookUrl || 'http://localhost:8000',
-      apiKey: settings.apiKey || '',
+      apiKey,
       criteria: settings.criteria,
     };
   } catch {

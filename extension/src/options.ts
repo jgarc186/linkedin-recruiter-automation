@@ -15,17 +15,57 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   criteria: DEFAULT_CRITERIA,
 };
 
+const SETTINGS_KEY = 'settings';
+const API_KEY_KEY = 'apiKey';
+
 export async function loadSettings(): Promise<ExtensionSettings> {
   try {
-    const data = await chrome.storage.local.get('settings');
-    return data.settings || DEFAULT_SETTINGS;
+    const [localData, sessionData] = await Promise.all([
+      chrome.storage.local.get(SETTINGS_KEY),
+      chrome.storage.session.get(API_KEY_KEY),
+    ]);
+
+    const storedSettings = localData[SETTINGS_KEY] || {};
+    const webhookUrl = storedSettings.webhookUrl || DEFAULT_SETTINGS.webhookUrl;
+    const criteria = storedSettings.criteria || DEFAULT_SETTINGS.criteria;
+
+    const sessionApiKey = sessionData[API_KEY_KEY];
+    const legacyApiKey = storedSettings.apiKey;
+    const apiKey = sessionApiKey || legacyApiKey || DEFAULT_SETTINGS.apiKey;
+
+    // Backward-compatible migration from insecure local settings.apiKey to session storage.
+    if (!sessionApiKey && legacyApiKey) {
+      await Promise.all([
+        chrome.storage.session.set({ [API_KEY_KEY]: legacyApiKey }),
+        chrome.storage.local.set({
+          [SETTINGS_KEY]: {
+            webhookUrl,
+            criteria,
+          },
+        }),
+      ]);
+    }
+
+    return {
+      webhookUrl,
+      apiKey,
+      criteria,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 
 export async function saveSettings(settings: ExtensionSettings): Promise<void> {
-  await chrome.storage.local.set({ settings });
+  await Promise.all([
+    chrome.storage.local.set({
+      [SETTINGS_KEY]: {
+        webhookUrl: settings.webhookUrl,
+        criteria: settings.criteria,
+      },
+    }),
+    chrome.storage.session.set({ [API_KEY_KEY]: settings.apiKey }),
+  ]);
 }
 
 function parseCommaSeparated(value: string): string[] {
