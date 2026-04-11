@@ -207,15 +207,6 @@ export async function pollPendingReplies(): Promise<void> {
   }
 }
 
-// Allowed extension IDs that can send external messages
-let ALLOWED_EXTERNAL_SENDERS: string[] = [
-  // Add your backend/companion extension IDs here
-];
-
-export function __testSetAllowedSenders(senders: string[]): void {
-  ALLOWED_EXTERNAL_SENDERS = senders;
-}
-
 // Named listener functions for reliable MV3 registration
 function onAlarmHandler(alarm: chrome.alarms.Alarm): void {
   if (alarm.name === 'keepAlive') {
@@ -241,17 +232,6 @@ function onMessageHandler(
   return false;
 }
 
-function onExternalMessageHandler(message: any, sender: chrome.runtime.MessageSender): void {
-  if (!ALLOWED_EXTERNAL_SENDERS.includes(sender.id || '')) {
-    console.warn('Rejected external message from unauthorized sender:', sender.id);
-    return;
-  }
-
-  if (message.type === 'DRAFTED_REPLY') {
-    handleWebhookResponse(message.data);
-  }
-}
-
 export function maintainConnection(): void {
   // Use chrome.alarms for reliable MV3 keep-alive and polling
   if (chrome.alarms) {
@@ -263,12 +243,10 @@ export function maintainConnection(): void {
 // Export listeners for testing
 export { onAlarmHandler as __testOnAlarmHandler };
 export { onMessageHandler as __testOnMessageHandler };
-export { onExternalMessageHandler as __testOnExternalMessageHandler };
 
 // Module-level listener registration (runs synchronously on every SW wake)
 if (typeof chrome !== 'undefined' && chrome.alarms) {
   chrome.alarms.onAlarm.addListener(onAlarmHandler);
   chrome.runtime.onMessage.addListener(onMessageHandler);
-  chrome.runtime.onMessageExternal?.addListener(onExternalMessageHandler);
   maintainConnection();
 }
