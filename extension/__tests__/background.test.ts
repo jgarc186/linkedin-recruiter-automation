@@ -17,6 +17,27 @@ describe('background.ts', () => {
   const mockFetch = vi.fn();
   global.fetch = mockFetch;
 
+  function setupChromeStorageMocks(overrides?: {
+    localGet?: ReturnType<typeof vi.fn>;
+    localSet?: ReturnType<typeof vi.fn>;
+    sessionGet?: ReturnType<typeof vi.fn>;
+    sessionSet?: ReturnType<typeof vi.fn>;
+  }) {
+    const localGet = overrides?.localGet ?? vi.fn().mockResolvedValue({});
+    const localSet = overrides?.localSet ?? vi.fn().mockResolvedValue(undefined);
+    const sessionGet = overrides?.sessionGet ?? vi.fn().mockResolvedValue({});
+    const sessionSet = overrides?.sessionSet ?? vi.fn().mockResolvedValue(undefined);
+
+    (global as any).chrome = {
+      storage: {
+        local: { get: localGet, set: localSet },
+        session: { get: sessionGet, set: sessionSet },
+      },
+    };
+
+    return { localGet, localSet, sessionGet, sessionSet };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -28,19 +49,15 @@ describe('background.ts', () => {
   });
 
   describe('getConfig', () => {
-    it('should read config from chrome.storage.local', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({
-              settings: {
-                webhookUrl: 'http://custom:9000',
-                apiKey: 'my-key',
-              },
-            }),
+    it('should read config from chrome.storage.local/session', async () => {
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({
+          settings: {
+            webhookUrl: 'http://custom:9000',
           },
-        },
-      };
+        }),
+        sessionGet: vi.fn().mockResolvedValueOnce({ apiKey: 'my-key' }),
+      });
 
       const config = await getConfig();
       expect(config.webhookUrl).toBe('http://custom:9000');
@@ -48,13 +65,10 @@ describe('background.ts', () => {
     });
 
     it('should return defaults when no settings stored', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        sessionGet: vi.fn().mockResolvedValueOnce({}),
+      });
 
       const config = await getConfig();
       expect(config.webhookUrl).toContain('localhost:8000');
@@ -70,32 +84,50 @@ describe('background.ts', () => {
         minCompensation: 150000,
       };
 
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({
-              settings: {
-                webhookUrl: 'http://localhost:8000',
-                apiKey: 'test-key',
-                criteria,
-              },
-            }),
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({
+          settings: {
+            webhookUrl: 'http://localhost:8000',
+            criteria,
           },
-        },
-      };
+        }),
+        sessionGet: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+      });
 
       const config = await getConfig();
       expect(config.criteria).toEqual(criteria);
     });
 
-    it('should return defaults on storage error', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockRejectedValueOnce(new Error('fail')),
+    it('should migrate legacy apiKey from local to session', async () => {
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({
+          settings: {
+            webhookUrl: 'http://localhost:8000',
+            apiKey: 'legacy-key',
           },
+        }),
+        localSet,
+        sessionGet: vi.fn().mockResolvedValueOnce({}),
+        sessionSet,
+      });
+
+      const config = await getConfig();
+      expect(config.apiKey).toBe('legacy-key');
+      expect(sessionSet).toHaveBeenCalledWith({ apiKey: 'legacy-key' });
+      expect(localSet).toHaveBeenCalledWith({
+        settings: {
+          webhookUrl: 'http://localhost:8000',
+          criteria: undefined,
         },
-      };
+      });
+    });
+
+    it('should return defaults on storage error', async () => {
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockRejectedValueOnce(new Error('fail')),
+      });
 
       const config = await getConfig();
       expect(config.webhookUrl).toContain('localhost:8000');
@@ -116,16 +148,13 @@ describe('background.ts', () => {
     };
 
     beforeEach(() => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValue({
-              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
-            }),
-            set: vi.fn().mockResolvedValue(undefined),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValue({
+          settings: { webhookUrl: 'http://localhost:8000' },
+        }),
+        localSet: vi.fn().mockResolvedValue(undefined),
+        sessionGet: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
+      });
     });
 
     it('should POST message data to webhook endpoint', async () => {
@@ -215,9 +244,11 @@ describe('background.ts', () => {
       (global as any).chrome.storage.local.get = vi.fn().mockResolvedValue({
         settings: {
           webhookUrl: 'http://localhost:8000',
-          apiKey: 'test-key',
           criteria,
         },
+      });
+      (global as any).chrome.storage.session.get = vi.fn().mockResolvedValue({
+        apiKey: 'test-key',
       });
 
       mockFetch.mockResolvedValueOnce({
@@ -242,6 +273,21 @@ describe('background.ts', () => {
       const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(requestBody.criteria).toBeUndefined();
     });
+
+    it('should not send webhook when API key is missing', async () => {
+      const mockAction = {
+        setBadgeText: vi.fn(),
+        setBadgeBackgroundColor: vi.fn(),
+        setTitle: vi.fn(),
+      };
+      (global as any).chrome.action = mockAction;
+      (global as any).chrome.storage.session.get = vi.fn().mockResolvedValue({ apiKey: '' });
+
+      await handleWebhookSend(mockMessage);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAction.setBadgeText).toHaveBeenCalledWith({ text: 'KEY!' });
+    });
   });
 
   describe('processPendingSends', () => {
@@ -260,7 +306,11 @@ describe('background.ts', () => {
           local: {
             get: vi.fn()
               .mockResolvedValueOnce({ pending_sends: pendingSends })
-              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' } }),
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
             set: vi.fn().mockResolvedValue(undefined),
           },
         },
@@ -293,7 +343,11 @@ describe('background.ts', () => {
           local: {
             get: vi.fn()
               .mockResolvedValueOnce({ pending_sends: pendingSends })
-              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' } }),
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
             set: vi.fn().mockResolvedValue(undefined),
           },
         },
@@ -464,8 +518,12 @@ describe('background.ts', () => {
         storage: {
           local: {
             get: vi.fn().mockResolvedValue({
-              settings: { webhookUrl: 'http://localhost:8000/webhook/message', apiKey: '' },
+              settings: { webhookUrl: 'http://localhost:8000/webhook/message' },
             }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
             set: vi.fn().mockResolvedValue(undefined),
           },
         },
@@ -548,8 +606,12 @@ describe('background.ts', () => {
           local: {
             ...mockStorage,
             get: vi.fn().mockResolvedValue({
-              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
+              settings: { webhookUrl: 'http://localhost:8000' },
             }),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
           },
         },
         tabs: mockTabs,
@@ -582,8 +644,12 @@ describe('background.ts', () => {
         storage: {
           local: {
             get: vi.fn().mockResolvedValue({
-              settings: { webhookUrl: 'http://localhost:8000', apiKey: 'test-key' },
+              settings: { webhookUrl: 'http://localhost:8000' },
             }),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
           },
         },
       };
@@ -591,6 +657,33 @@ describe('background.ts', () => {
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
       await expect(pollPendingReplies()).resolves.not.toThrow();
+    });
+
+    it('should not fetch pending replies when API key is missing', async () => {
+      const mockAction = {
+        setBadgeText: vi.fn(),
+        setBadgeBackgroundColor: vi.fn(),
+        setTitle: vi.fn(),
+      };
+      (global as any).chrome = {
+        action: mockAction,
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({
+              settings: { webhookUrl: 'http://localhost:8000' },
+            }),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({ apiKey: '' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await pollPendingReplies();
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockAction.setBadgeText).toHaveBeenCalledWith({ text: 'KEY!' });
     });
 
     it('should call processPendingSends on keepAlive alarm', async () => {

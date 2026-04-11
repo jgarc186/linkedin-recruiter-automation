@@ -1,5 +1,6 @@
 import type { UserCriteria } from '../../shared/types';
 import { DEFAULT_CRITERIA } from '../../shared/types';
+import { loadStorageConfig, saveStorageConfig, DEFAULT_WEBHOOK_URL } from './storageConfig';
 
 export type { UserCriteria };
 
@@ -10,22 +11,26 @@ export interface ExtensionSettings {
 }
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  webhookUrl: 'http://localhost:8000',
+  webhookUrl: DEFAULT_WEBHOOK_URL,
   apiKey: '',
   criteria: DEFAULT_CRITERIA,
 };
 
 export async function loadSettings(): Promise<ExtensionSettings> {
   try {
-    const data = await chrome.storage.local.get('settings');
-    return data.settings || DEFAULT_SETTINGS;
+    const { webhookUrl, apiKey, criteria } = await loadStorageConfig();
+    return {
+      webhookUrl,
+      apiKey,
+      criteria: criteria || DEFAULT_SETTINGS.criteria,
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
 }
 
 export async function saveSettings(settings: ExtensionSettings): Promise<void> {
-  await chrome.storage.local.set({ settings });
+  await saveStorageConfig(settings);
 }
 
 function parseCommaSeparated(value: string): string[] {
@@ -67,6 +72,9 @@ export async function initOptions(): Promise<void> {
   avoidKeywordsInput.value = settings.criteria.avoidKeywords.join(', ');
   locationsInput.value = settings.criteria.locations.join(', ');
   minCompensationInput.value = String(settings.criteria.minCompensation);
+  if (saveStatusEl && !settings.apiKey) {
+    saveStatusEl.textContent = 'API key is session-only and clears when the browser closes. Re-enter it after restart.';
+  }
 
   // Handle form submit
   const form = document.getElementById('options-form') as HTMLFormElement;

@@ -8,6 +8,27 @@ import {
 import type { ExtensionSettings } from '../src/options';
 
 describe('options.ts', () => {
+  function setupChromeStorageMocks(overrides?: {
+    localGet?: ReturnType<typeof vi.fn>;
+    localSet?: ReturnType<typeof vi.fn>;
+    sessionGet?: ReturnType<typeof vi.fn>;
+    sessionSet?: ReturnType<typeof vi.fn>;
+  }) {
+    const localGet = overrides?.localGet ?? vi.fn().mockResolvedValue({});
+    const localSet = overrides?.localSet ?? vi.fn().mockResolvedValue(undefined);
+    const sessionGet = overrides?.sessionGet ?? vi.fn().mockResolvedValue({});
+    const sessionSet = overrides?.sessionSet ?? vi.fn().mockResolvedValue(undefined);
+
+    (global as any).chrome = {
+      storage: {
+        local: { get: localGet, set: localSet },
+        session: { get: sessionGet, set: sessionSet },
+      },
+    };
+
+    return { localGet, localSet, sessionGet, sessionSet };
+  }
+
   beforeEach(() => {
     document.body.innerHTML = '';
     vi.clearAllMocks();
@@ -32,9 +53,8 @@ describe('options.ts', () => {
 
   describe('loadSettings', () => {
     it('should load settings from chrome storage', async () => {
-      const stored: ExtensionSettings = {
+      const stored: Omit<ExtensionSettings, 'apiKey'> = {
         webhookUrl: 'http://custom:9000',
-        apiKey: 'my-key',
         criteria: {
           minSeniority: 'staff',
           preferredTechStack: ['Rust'],
@@ -44,13 +64,10 @@ describe('options.ts', () => {
         },
       };
 
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({ settings: stored }),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({ settings: stored }),
+        sessionGet: vi.fn().mockResolvedValueOnce({ apiKey: 'my-key' }),
+      });
 
       const settings = await loadSettings();
       expect(settings.webhookUrl).toBe('http://custom:9000');
@@ -59,26 +76,47 @@ describe('options.ts', () => {
     });
 
     it('should return defaults when no settings stored', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        sessionGet: vi.fn().mockResolvedValueOnce({}),
+      });
 
       const settings = await loadSettings();
       expect(settings).toEqual(DEFAULT_SETTINGS);
     });
 
-    it('should return defaults on storage error', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockRejectedValueOnce(new Error('fail')),
+    it('should migrate legacy apiKey from local to session storage', async () => {
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({
+          settings: {
+            webhookUrl: 'http://custom:9000',
+            apiKey: 'legacy-key',
+            criteria: DEFAULT_SETTINGS.criteria,
           },
+        }),
+        localSet,
+        sessionGet: vi.fn().mockResolvedValueOnce({}),
+        sessionSet,
+      });
+
+      const settings = await loadSettings();
+
+      expect(settings.apiKey).toBe('legacy-key');
+      expect(sessionSet).toHaveBeenCalledWith({ apiKey: 'legacy-key' });
+      expect(localSet).toHaveBeenCalledWith({
+        settings: {
+          webhookUrl: 'http://custom:9000',
+          criteria: DEFAULT_SETTINGS.criteria,
         },
-      };
+      });
+    });
+
+    it('should return defaults on storage error', async () => {
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockRejectedValueOnce(new Error('fail')),
+      });
 
       const settings = await loadSettings();
       expect(settings).toEqual(DEFAULT_SETTINGS);
@@ -87,10 +125,12 @@ describe('options.ts', () => {
 
   describe('saveSettings', () => {
     it('should save settings to chrome storage', async () => {
-      const mockSet = vi.fn().mockResolvedValueOnce(undefined);
-      (global as any).chrome = {
-        storage: { local: { set: mockSet } },
-      };
+      const localSet = vi.fn().mockResolvedValueOnce(undefined);
+      const sessionSet = vi.fn().mockResolvedValueOnce(undefined);
+      setupChromeStorageMocks({
+        localSet,
+        sessionSet,
+      });
 
       const settings: ExtensionSettings = {
         ...DEFAULT_SETTINGS,
@@ -99,19 +139,56 @@ describe('options.ts', () => {
 
       await saveSettings(settings);
 
-      expect(mockSet).toHaveBeenCalledWith({ settings });
+      expect(localSet).toHaveBeenCalledWith({
+        settings: {
+          webhookUrl: settings.webhookUrl,
+          criteria: settings.criteria,
+        },
+      });
+      expect(sessionSet).toHaveBeenCalledWith({ apiKey: settings.apiKey });
     });
 
     it('should throw on storage error', async () => {
-      (global as any).chrome = {
-        storage: {
-          local: {
-            set: vi.fn().mockRejectedValueOnce(new Error('Storage full')),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localSet: vi.fn().mockRejectedValueOnce(new Error('Storage full')),
+      });
 
       await expect(saveSettings(DEFAULT_SETTINGS)).rejects.toThrow('Storage full');
+    });
+
+    it('should rollback local settings when session write fails', async () => {
+      const previousLocal = {
+        webhookUrl: 'http://old:8000',
+        criteria: DEFAULT_SETTINGS.criteria,
+      };
+      const previousApiKey = 'old-key';
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn()
+        .mockRejectedValueOnce(new Error('Session write failed'))
+        .mockResolvedValueOnce(undefined);
+
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValue({ settings: previousLocal }),
+        sessionGet: vi.fn().mockResolvedValue({ apiKey: previousApiKey }),
+        localSet,
+        sessionSet,
+      });
+
+      await expect(saveSettings({
+        ...DEFAULT_SETTINGS,
+        webhookUrl: 'http://new:9000',
+        apiKey: 'new-key',
+      })).rejects.toThrow('Session write failed');
+
+      expect(localSet).toHaveBeenNthCalledWith(1, {
+        settings: {
+          webhookUrl: 'http://new:9000',
+          criteria: DEFAULT_SETTINGS.criteria,
+        },
+      });
+      expect(localSet).toHaveBeenNthCalledWith(2, {
+        settings: previousLocal,
+      });
     });
   });
 
@@ -147,14 +224,11 @@ describe('options.ts', () => {
         },
       };
 
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({ settings: stored }),
-            set: vi.fn().mockResolvedValueOnce(undefined),
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({ settings: stored }),
+        localSet: vi.fn().mockResolvedValueOnce(undefined),
+        sessionGet: vi.fn().mockResolvedValueOnce({ apiKey: 'secret-123' }),
+      });
 
       await initOptions();
 
@@ -170,15 +244,14 @@ describe('options.ts', () => {
     it('should save settings on form submit', async () => {
       setupOptionsDOM();
 
-      const mockSet = vi.fn().mockResolvedValue(undefined);
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-            set: mockSet,
-          },
-        },
-      };
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+        sessionGet: vi.fn().mockResolvedValueOnce({}),
+        sessionSet,
+      });
 
       await initOptions();
 
@@ -197,27 +270,23 @@ describe('options.ts', () => {
 
       // Wait for async save
       await vi.waitFor(() => {
-        expect(mockSet).toHaveBeenCalledWith({
+        expect(localSet).toHaveBeenCalledWith({
           settings: expect.objectContaining({
             webhookUrl: 'http://new:3000',
-            apiKey: 'new-key',
           }),
         });
+        expect(sessionSet).toHaveBeenCalledWith({ apiKey: 'new-key' });
       });
     });
 
     it('should show save confirmation', async () => {
       setupOptionsDOM();
 
-      const mockSet = vi.fn().mockResolvedValue(undefined);
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-            set: mockSet,
-          },
-        },
-      };
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+      });
 
       await initOptions();
 
@@ -240,15 +309,11 @@ describe('options.ts', () => {
     it('should show HTTP warning for non-localhost URLs', async () => {
       setupOptionsDOM();
 
-      const mockSet = vi.fn().mockResolvedValue(undefined);
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-            set: mockSet,
-          },
-        },
-      };
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+      });
 
       await initOptions();
 
@@ -270,21 +335,15 @@ describe('options.ts', () => {
       });
 
       // Settings should still be saved despite warning
-      expect(mockSet).toHaveBeenCalled();
+      expect(localSet).toHaveBeenCalled();
     });
 
     it('should not show HTTP warning for localhost URLs', async () => {
       setupOptionsDOM();
 
-      const mockSet = vi.fn().mockResolvedValue(undefined);
-      (global as any).chrome = {
-        storage: {
-          local: {
-            get: vi.fn().mockResolvedValueOnce({}),
-            set: mockSet,
-          },
-        },
-      };
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+      });
 
       await initOptions();
 
