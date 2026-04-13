@@ -157,6 +157,7 @@ export function injectReplyButton(threadId: string, reply: string): void {
   const existing = document.querySelector(safeSelector('data-reply-thread', threadId));
   if (existing) {
     const textEl = existing.querySelector('.lrp-reply-text');
+    // Security: textContent (not innerHTML) prevents XSS from backend-supplied reply
     if (textEl) textEl.textContent = reply;
     return;
   }
@@ -167,6 +168,7 @@ export function injectReplyButton(threadId: string, reply: string): void {
 
   const replyText = document.createElement('div');
   replyText.className = 'lrp-reply-text';
+  // Security: textContent (not innerHTML) prevents XSS from backend-supplied reply
   replyText.textContent = reply;
 
   const sendBtn = document.createElement('button');
