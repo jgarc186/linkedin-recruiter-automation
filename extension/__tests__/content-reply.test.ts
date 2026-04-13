@@ -101,6 +101,27 @@ describe('content.ts - reply injection', () => {
       expect(containers[0].querySelector('.lrp-reply-text')!.textContent).toBe('Reply 2');
     });
 
+    it('should treat XSS payload as plain text, not HTML (security regression)', () => {
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_xss">
+            <div class="msg-s-event-listitem__body"><p>Opportunity</p></div>
+          </div>
+        </div>
+      `;
+
+      const xssPayload = '<img src=x onerror=alert(1)><script>alert(1)</script>';
+      injectReplyButton('thread_xss', xssPayload);
+
+      const replyText = document.querySelector('[data-reply-thread="thread_xss"] .lrp-reply-text');
+      expect(replyText).not.toBeNull();
+      // The raw payload must be stored as text, not parsed as markup
+      expect(replyText!.textContent).toBe(xssPayload);
+      // No <img> or <script> elements should have been created by the payload
+      expect(replyText!.querySelector('img')).toBeNull();
+      expect(replyText!.querySelector('script')).toBeNull();
+    });
+
     it('should do nothing if container is missing', () => {
       document.body.innerHTML = '';
 
