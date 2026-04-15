@@ -84,7 +84,8 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
 
     const apiKey = (request.headers['x-api-key'] as string) || '';
     if (!timingSafeEqual(apiKey, config.apiKey)) {
-      return reply.status(401).send({ error: 'Unauthorized' });
+      reply.status(401).send({ error: 'Unauthorized' });
+      return;
     }
   });
 
@@ -138,7 +139,8 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       // Validate Telegram webhook secret token
       const secretToken = (request.headers['x-telegram-bot-api-secret-token'] as string) || '';
       if (!timingSafeEqual(secretToken, config.telegramWebhookSecret)) {
-        return reply.status(401).send({ error: 'Invalid webhook secret' });
+        reply.status(401).send({ error: 'Invalid webhook secret' });
+        return;
       }
 
       const { callback_query } = request.body as { callback_query: any };

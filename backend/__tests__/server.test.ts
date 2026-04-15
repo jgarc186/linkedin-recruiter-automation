@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Fastify from 'fastify';
+import Fastify, { FastifyInstance } from 'fastify';
 import { webhookRoutes } from '../src/routes/webhook.js';
 
 // Mock config
@@ -73,7 +73,7 @@ import { generateTimeSlots, scheduleMeeting } from '../src/services/calendar.js'
 import { getMessage, getPendingReplies } from '../src/db/database.js';
 
 describe('webhook routes', () => {
-  let app: ReturnType<typeof Fastify>;
+  let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -702,6 +702,62 @@ describe('server.ts - createApp & start', () => {
       expect(response.headers['access-control-allow-origin']).toBe(
         'chrome-extension://test-extension-id',
       );
+      await app.close();
+    });
+  });
+
+  describe('trustProxy / header spoofing protection (GHSA-444r-cwp2-x5xf)', () => {
+    it('should not reflect X-Forwarded-Host in hostname when trustProxy is false', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+      app.get('/debug/hostname', async (request) => ({ hostname: request.hostname }));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/debug/hostname',
+        headers: { 'X-Forwarded-Host': 'evil.attacker.com' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.hostname).not.toBe('evil.attacker.com');
+      await app.close();
+    });
+
+    it('should ignore X-Forwarded-Proto and X-Forwarded-For when trustProxy is false', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: {
+          'X-Forwarded-Proto': 'https',
+          'X-Forwarded-For': '1.2.3.4, 5.6.7.8',
+          'X-Forwarded-Host': 'evil.attacker.com',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.payload);
+      expect(body.status).toBe('ok');
+      await app.close();
+    });
+
+    it('should use socket IP for rate limiting, ignoring X-Forwarded-For', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      // With trustProxy: false, X-Forwarded-For is ignored and the real socket
+      // IP (127.0.0.1 in inject) is used — an attacker cannot bypass rate limiting
+      // by spoofing this header to appear as a different IP
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { 'X-Forwarded-For': '1.2.3.4' },
+      });
+
+      expect(response.statusCode).toBe(200);
       await app.close();
     });
   });

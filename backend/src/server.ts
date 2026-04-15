@@ -6,6 +6,7 @@ import { config, validateConfig } from './config.js';
 
 export async function createApp() {
   const app = Fastify({
+    trustProxy: false, // GHSA-444r-cwp2-x5xf: never trust X-Forwarded-* from clients
     bodyLimit: 65536,
     logger: {
       serializers: {

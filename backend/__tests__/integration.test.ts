@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Fastify from 'fastify';
+import Fastify, { FastifyInstance } from 'fastify';
 import { webhookRoutes } from '../src/routes/webhook.js';
 
 // Mock config with real values
@@ -57,7 +57,7 @@ vi.mock('../src/services/calendar.js', () => ({
 import { sendApprovalRequest, handleCallbackQuery } from '../src/services/telegram.js';
 
 describe('integration: full webhook flow with real database', () => {
-  let app: ReturnType<typeof Fastify>;
+  let app: FastifyInstance;
 
   beforeEach(async () => {
     vi.clearAllMocks();
