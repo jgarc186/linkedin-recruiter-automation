@@ -761,4 +761,111 @@ describe('server.ts - createApp & start', () => {
       await app.close();
     });
   });
+
+  describe('rate limiting', () => {
+    const validMessage = {
+      message_id: 'msg_rl',
+      thread_id: 'thread_rl',
+      sender: { name: 'RL Recruiter', title: 'Recruiter', company: 'RLCorp' },
+      content: 'Rate limit test message',
+      timestamp: '2026-01-01T00:00:00Z',
+    };
+
+    it('/health is excluded from rate limiting', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      for (let i = 0; i < 20; i++) {
+        const response = await app.inject({ method: 'GET', url: '/health' });
+        expect(response.statusCode).toBe(200);
+      }
+
+      await app.close();
+    });
+
+    it('/webhook/message returns 429 after 10 requests from the same API key', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      for (let i = 0; i < 10; i++) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/webhook/message',
+          payload: { ...validMessage, message_id: `msg_rl_${i}` },
+          headers: { 'X-API-Key': 'test-api-key' },
+        });
+        expect(response.statusCode).toBe(200);
+      }
+
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...validMessage, message_id: 'msg_rl_11' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(blocked.statusCode).toBe(429);
+
+      await app.close();
+    });
+
+    it('429 response includes retry-after header', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      for (let i = 0; i < 10; i++) {
+        await app.inject({
+          method: 'POST',
+          url: '/webhook/message',
+          payload: { ...validMessage, message_id: `msg_ra_${i}` },
+          headers: { 'X-API-Key': 'test-api-key' },
+        });
+      }
+
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...validMessage, message_id: 'msg_ra_11' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(blocked.statusCode).toBe(429);
+      expect(blocked.headers['retry-after']).toBeDefined();
+
+      await app.close();
+    });
+
+    it('different API keys have independent rate limit counters', async () => {
+      const { createApp } = await import('../src/server.js');
+      const app = await createApp();
+
+      // Exhaust the limit for 'test-api-key'
+      for (let i = 0; i < 10; i++) {
+        await app.inject({
+          method: 'POST',
+          url: '/webhook/message',
+          payload: { ...validMessage, message_id: `msg_iso_${i}` },
+          headers: { 'X-API-Key': 'test-api-key' },
+        });
+      }
+
+      // 'test-api-key' is now rate-limited
+      const blocked = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...validMessage, message_id: 'msg_iso_11' },
+        headers: { 'X-API-Key': 'test-api-key' },
+      });
+      expect(blocked.statusCode).toBe(429);
+
+      // A different key has its own fresh counter — rate limit passes, auth fails (401 not 429)
+      const otherKey = await app.inject({
+        method: 'POST',
+        url: '/webhook/message',
+        payload: { ...validMessage, message_id: 'msg_iso_other' },
+        headers: { 'X-API-Key': 'other-api-key' },
+      });
+      expect(otherKey.statusCode).toBe(401);
+
+      await app.close();
+    });
+  });
 });
