@@ -90,7 +90,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // Receive messages from extension
-  fastify.post('/webhook/message', { schema: messageSchema }, async (request, reply) => {
+  fastify.post('/webhook/message', { schema: messageSchema, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
     try {
       const messageData = request.body as WebhookMessagePayload;
 

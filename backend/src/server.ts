@@ -26,6 +26,16 @@ export async function createApp() {
   await app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
+    keyGenerator: (request) => {
+      const apiKey = request.headers['x-api-key'];
+      return typeof apiKey === 'string' && apiKey ? apiKey : request.ip;
+    },
+    addHeaders: {
+      'x-ratelimit-limit': true,
+      'x-ratelimit-remaining': true,
+      'x-ratelimit-reset': true,
+      'retry-after': true,
+    },
   });
 
   await app.register(cors, {
@@ -37,8 +47,8 @@ export async function createApp() {
   // Register routes
   await app.register(webhookRoutes);
 
-  // Health check
-  app.get('/health', async () => {
+  // Health check — excluded from rate limiting
+  app.get('/health', { config: { rateLimit: false } }, async () => {
     return { status: 'ok' };
   });
 
