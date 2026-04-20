@@ -3,6 +3,7 @@ import {
   injectReplyButton,
   sendReply,
   handleReplyMessage,
+  onMessageListener,
 } from '../src/content';
 
 describe('content.ts - reply injection', () => {
@@ -231,6 +232,54 @@ describe('content.ts - reply injection', () => {
       document.body.innerHTML = '';
 
       expect(() => sendReply('thread_1', 'text')).not.toThrow();
+    });
+  });
+
+  describe('onMessageListener', () => {
+    const validSender = { id: 'test-extension-id' } as chrome.runtime.MessageSender;
+    const foreignSender = { id: 'other-extension-id' } as chrome.runtime.MessageSender;
+    const noIdSender = {} as chrome.runtime.MessageSender;
+
+    beforeEach(() => {
+      (global as any).chrome = {
+        runtime: {
+          id: 'test-extension-id',
+        },
+      };
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_1">
+            <div class="msg-s-event-listitem__body"><p>Opportunity</p></div>
+          </div>
+        </div>
+      `;
+    });
+
+    it('should inject reply when sender.id matches own extension id', () => {
+      onMessageListener(
+        { type: 'NEW_REPLY_AVAILABLE', threadId: 'thread_1', draftedReply: 'Hello' },
+        validSender
+      );
+
+      expect(document.querySelector('[data-reply-thread="thread_1"]')).not.toBeNull();
+    });
+
+    it('should reject messages from a foreign extension (spoofing attack)', () => {
+      onMessageListener(
+        { type: 'NEW_REPLY_AVAILABLE', threadId: 'thread_1', draftedReply: 'Injected' },
+        foreignSender
+      );
+
+      expect(document.querySelector('[data-reply-thread]')).toBeNull();
+    });
+
+    it('should reject messages with no sender id (spoofing attack)', () => {
+      onMessageListener(
+        { type: 'NEW_REPLY_AVAILABLE', threadId: 'thread_1', draftedReply: 'Injected' },
+        noIdSender
+      );
+
+      expect(document.querySelector('[data-reply-thread]')).toBeNull();
     });
   });
 
