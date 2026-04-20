@@ -245,6 +245,14 @@ export function handleReplyMessage(message: ReplyMessage): void {
   injectReplyButton(message.threadId, message.draftedReply);
 }
 
+export function onMessageListener(
+  message: ReplyMessage,
+  sender: chrome.runtime.MessageSender
+): void {
+  if (sender.id !== chrome.runtime.id) return;
+  handleReplyMessage(message);
+}
+
 let observer: MutationObserver | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -264,10 +272,7 @@ export function initContentScript(): void {
 
   observer.observe(container, { childList: true, subtree: true });
 
-  // Listen for reply messages from background script
-  chrome.runtime?.onMessage?.addListener((message: ReplyMessage) => {
-    handleReplyMessage(message);
-  });
+  chrome.runtime?.onMessage?.addListener(onMessageListener);
 }
 
 // Auto-initialize when injected as a content script
