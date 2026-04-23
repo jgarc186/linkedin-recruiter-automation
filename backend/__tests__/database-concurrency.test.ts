@@ -140,7 +140,8 @@ describe('database concurrency', () => {
     updateMessageStatus(db, 'msg_il_2', 'replied');
     const secondRead = getPendingReplies(db);
 
-    // First read gets all pending replies regardless of message status
+    // getPendingReplies atomically drains pending_replies; message status lives in a
+    // separate table and has no effect on reply delivery
     expect(firstRead).toHaveLength(COUNT);
     // Second read gets nothing — all already delivered
     expect(secondRead).toHaveLength(0);

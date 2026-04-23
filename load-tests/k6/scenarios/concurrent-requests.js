@@ -57,6 +57,8 @@ export default function () {
     `${BASE_URL}/webhook/reply`,
     JSON.stringify({
       message_id: `msg_load_${__VU}_${__ITER}`,
+      thread_id: `thread_msg_load_${__VU}_${__ITER}`,
+      user_choice: 'lets_talk',
       drafted_reply: 'Load test reply',
     }),
     { headers: authHeaders, tags: { endpoint: 'reply' } },

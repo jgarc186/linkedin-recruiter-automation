@@ -26,6 +26,7 @@ export const options = {
   scenarios: {
     spike: {
       executor: 'ramping-vus',
+      exec: 'spike',
       startVUs: 0,
       stages: [
         { duration: '10s', target: 200 },
