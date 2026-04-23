@@ -4,6 +4,7 @@ import type { MessageData, TelegramCallbackData } from '../../../shared/types.js
 let bot: TelegramBot | null = null;
 
 function getBot(): TelegramBot {
+  /* v8 ignore start — tests always pre-seed bot via __testSetMockBot */
   if (!bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN || '';
     if (!token) {
@@ -11,14 +12,17 @@ function getBot(): TelegramBot {
     }
     bot = new TelegramBot(token, { polling: false });
   }
+  /* v8 ignore end */
   return bot;
 }
 
 // For testing only
 export function __testSetMockBot(mockBot: TelegramBot): void {
+  /* v8 ignore start — guard only fires outside test env, never in vitest */
   if (process.env.NODE_ENV !== 'test') {
     throw new Error('__testSetMockBot is only available in test environment');
   }
+  /* v8 ignore end */
   bot = mockBot as TelegramBot;
 }
 

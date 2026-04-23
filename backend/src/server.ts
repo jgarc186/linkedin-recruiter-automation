@@ -52,10 +52,18 @@ export async function createApp() {
     return { status: 'ok' };
   });
 
+  // Memory diagnostics — dev/test only, never expose in production
+  if (process.env.NODE_ENV !== 'production') {
+    app.get('/debug/memory', { config: { rateLimit: false } }, async () => {
+      const { rss, heapTotal, heapUsed, external } = process.memoryUsage();
+      return { rss, heapTotal, heapUsed, external };
+    });
+  }
+
   return app;
 }
 
-// Start server
+/* v8 ignore start */
 const start = async () => {
   try {
     validateConfig();
@@ -74,5 +82,6 @@ const start = async () => {
 if (process.env.NODE_ENV !== 'test') {
   start();
 }
+/* v8 ignore end */
 
 export { start };

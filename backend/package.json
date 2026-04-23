@@ -8,7 +8,12 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "load-test:concurrent": "k6 run ../load-tests/k6/scenarios/concurrent-requests.js",
+    "load-test:db": "k6 run ../load-tests/k6/scenarios/database-locking.js",
+    "load-test:memory": "k6 run ../load-tests/k6/scenarios/memory-leak.js",
+    "load-test:spike": "k6 run ../load-tests/k6/scenarios/rate-limit-spike.js",
+    "load-test:all": "npm run load-test:concurrent && npm run load-test:db && npm run load-test:spike"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
