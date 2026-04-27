@@ -3,6 +3,8 @@ import { loadStorageConfig, DEFAULT_WEBHOOK_URL } from './storageConfig';
 
 const PENDING_SENDS_KEY = 'pending_sends';
 const PENDING_SEND_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_RETRY_ATTEMPTS = 5;
+const BASE_RETRY_DELAY_MS = 60 * 1000;
 const MISSING_API_KEY_BADGE_TEXT = 'KEY!';
 
 interface PendingSend {
@@ -10,6 +12,7 @@ interface PendingSend {
   data: MessageData;
   enqueuedAt: number;
   attempts: number;
+  nextRetryAt: number;
 }
 
 let hasWarnedMissingApiKey = false;
@@ -64,6 +67,7 @@ async function enqueuePendingSend(data: MessageData): Promise<string> {
     data,
     enqueuedAt: Date.now(),
     attempts: 0,
+    nextRetryAt: 0,
   });
   await chrome.storage.local.set({ [PENDING_SENDS_KEY]: pending });
   return id;
@@ -122,6 +126,16 @@ export async function processPendingSends(): Promise<void> {
   const stillPending: PendingSend[] = [];
 
   for (const entry of nonStalePending) {
+    if (entry.attempts >= MAX_RETRY_ATTEMPTS) {
+      console.error(`Dropping message ${entry.data.message_id} after ${MAX_RETRY_ATTEMPTS} failed attempts`);
+      continue;
+    }
+
+    if (now < (entry.nextRetryAt ?? 0)) {
+      stillPending.push(entry);
+      continue;
+    }
+
     try {
       const payload = criteria ? { ...entry.data, criteria } : entry.data;
       const response = await fetch(`${webhookUrl}/webhook/message`, {
@@ -136,7 +150,9 @@ export async function processPendingSends(): Promise<void> {
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       // success — don't add to stillPending
     } catch {
-      stillPending.push({ ...entry, attempts: entry.attempts + 1 });
+      const newAttempts = entry.attempts + 1;
+      const backoffMs = Math.pow(2, entry.attempts) * BASE_RETRY_DELAY_MS;
+      stillPending.push({ ...entry, attempts: newAttempts, nextRetryAt: now + backoffMs });
     }
   }
 

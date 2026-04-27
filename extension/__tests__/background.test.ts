@@ -296,6 +296,7 @@ describe('background.ts', () => {
           data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
           enqueuedAt: Date.now() - 1000,
           attempts: 1,
+          nextRetryAt: 0,
         },
       ];
 
@@ -333,6 +334,7 @@ describe('background.ts', () => {
           data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
           enqueuedAt: Date.now() - 1000,
           attempts: 0,
+          nextRetryAt: 0,
         },
       ];
 
@@ -378,6 +380,7 @@ describe('background.ts', () => {
           data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
           enqueuedAt: staleTime,
           attempts: 5,
+          nextRetryAt: 0,
         },
       ];
 
@@ -418,6 +421,194 @@ describe('background.ts', () => {
       expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({
         pending_sends: [],
       });
+    });
+
+    it('should drop entries that have reached MAX_RETRY_ATTEMPTS and log an error', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const pendingSends = [
+        {
+          id: 'send_exhausted',
+          data: { message_id: 'msg_exhausted', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 5,
+          nextRetryAt: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await processPendingSends();
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('msg_exhausted'));
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({ pending_sends: [] });
+    });
+
+    it('should skip entries whose nextRetryAt is in the future without fetching', async () => {
+      const pendingSends = [
+        {
+          id: 'send_backoff',
+          data: { message_id: 'msg_backoff', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 2,
+          nextRetryAt: Date.now() + 4 * 60 * 1000, // 4 minutes from now
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await processPendingSends();
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({
+        pending_sends: expect.arrayContaining([
+          expect.objectContaining({ id: 'send_backoff', attempts: 2 }),
+        ]),
+      });
+    });
+
+    it('should set nextRetryAt with exponential backoff on failure', async () => {
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const pendingSends = [
+        {
+          id: 'send_1',
+          data: { message_id: 'msg_1', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: now - 1000,
+          attempts: 0,
+          nextRetryAt: 0,
+        },
+        {
+          id: 'send_2',
+          data: { message_id: 'msg_2', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: now - 1000,
+          attempts: 2,
+          nextRetryAt: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      await processPendingSends();
+
+      const savedQueue: any[] = (global as any).chrome.storage.local.set.mock.calls[0][0].pending_sends;
+
+      const entry1 = savedQueue.find((e: any) => e.id === 'send_1');
+      const entry2 = savedQueue.find((e: any) => e.id === 'send_2');
+
+      // attempts=0 → backoff 2^0 * 60s = 60 000 ms
+      expect(entry1.attempts).toBe(1);
+      expect(entry1.nextRetryAt).toBe(now + 60_000);
+
+      // attempts=2 → backoff 2^2 * 60s = 240 000 ms
+      expect(entry2.attempts).toBe(3);
+      expect(entry2.nextRetryAt).toBe(now + 240_000);
+    });
+
+    it('should retry entry at exactly MAX_RETRY_ATTEMPTS - 1 and then drop it on the next cycle', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const now = Date.now();
+      vi.setSystemTime(now);
+
+      const pendingSends = [
+        {
+          id: 'send_boundary',
+          data: { message_id: 'msg_boundary', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: now - 1000,
+          attempts: 4,
+          nextRetryAt: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      // First cycle: attempts=4, should retry and become attempts=5
+      await processPendingSends();
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const queueAfterFirst: any[] = (global as any).chrome.storage.local.set.mock.calls[0][0].pending_sends;
+      const entryAfterFirst = queueAfterFirst[0];
+      expect(entryAfterFirst.attempts).toBe(5);
+
+      // Second cycle: attempts=5, should be dropped
+      vi.clearAllMocks();
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: queueAfterFirst })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      await processPendingSends();
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('msg_boundary'));
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({ pending_sends: [] });
     });
   });
 
