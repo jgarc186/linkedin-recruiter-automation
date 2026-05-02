@@ -5,6 +5,9 @@ import {
   extractMessageData,
   resetProcessedMessages,
   initContentScript,
+  cleanup,
+  handleVisibilityChange,
+  onMessageListener,
   RECRUITER_KEYWORDS,
 } from '../src/content';
 import type { MessageData } from '../../shared/types';
@@ -338,6 +341,123 @@ describe('content.ts', () => {
       initContentScript();
 
       expect(mockAddListener).toHaveBeenCalled();
+    });
+  });
+
+  describe('cleanup and lifecycle', () => {
+    let mockDisconnect: ReturnType<typeof vi.fn>;
+    let mockObserve: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      document.body.innerHTML = '<div id="msg-conversations-container"></div>';
+
+      mockDisconnect = vi.fn();
+      mockObserve = vi.fn();
+
+      (global as any).MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: mockObserve,
+        disconnect: mockDisconnect,
+      }));
+
+      (global as any).chrome = {
+        ...((global as any).chrome),
+        runtime: {
+          sendMessage: vi.fn().mockResolvedValue(undefined),
+          onMessage: {
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+          },
+        },
+      };
+
+      initContentScript();
+    });
+
+    it('cleanup() disconnects the observer', () => {
+      cleanup();
+      expect(mockDisconnect).toHaveBeenCalledOnce();
+    });
+
+    it('cleanup() clears an active debounce timer', () => {
+      // Trigger the observer callback to arm the debounce timer
+      const observerCallback = (global as any).MutationObserver.mock.calls[0][0];
+      observerCallback([]);
+      cleanup();
+      // disconnect still called exactly once — no second fire from the timer
+      expect(mockDisconnect).toHaveBeenCalledOnce();
+    });
+
+    it('cleanup() is safe to call when observer is already null', () => {
+      cleanup(); // nulls observer
+      cleanup(); // observer is null — should not throw
+      expect(mockDisconnect).toHaveBeenCalledOnce();
+    });
+
+    it('cleanup() removes the onMessage listener', () => {
+      cleanup();
+      expect((global as any).chrome.runtime.onMessage.removeListener).toHaveBeenCalledWith(onMessageListener);
+    });
+
+    it('handleVisibilityChange() disconnects observer when document becomes hidden', () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      handleVisibilityChange();
+      expect(mockDisconnect).toHaveBeenCalledOnce();
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    });
+
+    it('handleVisibilityChange() clears an active debounce timer when document becomes hidden', () => {
+      const observerCallback = (global as any).MutationObserver.mock.calls[0][0];
+      observerCallback([]); // arms the debounce timer
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      handleVisibilityChange();
+      expect(mockDisconnect).toHaveBeenCalledOnce();
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    });
+
+    it('handleVisibilityChange() re-observes the container when document becomes visible', () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      handleVisibilityChange();
+      mockObserve.mockClear();
+
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      handleVisibilityChange();
+      expect(mockObserve).toHaveBeenCalledWith(expect.any(Element), { childList: true, subtree: true });
+    });
+
+    it('handleVisibilityChange() runs detectNewMessages when document becomes visible', () => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      handleVisibilityChange();
+
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_vis_resume">
+            <div class="msg-s-event-listitem__body"><p>I have an opportunity for you</p></div>
+          </div>
+        </div>
+      `;
+      resetProcessedMessages();
+      (global as any).chrome.runtime.sendMessage.mockClear();
+
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      handleVisibilityChange();
+
+      expect((global as any).chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'NEW_MESSAGE_DETECTED' })
+      );
+    });
+
+    it('initContentScript() registers beforeunload listener on window', () => {
+      const spy = vi.spyOn(window, 'addEventListener');
+      initContentScript();
+      expect(spy).toHaveBeenCalledWith('beforeunload', cleanup);
+      spy.mockRestore();
+    });
+
+    it('initContentScript() registers visibilitychange listener on document', () => {
+      const spy = vi.spyOn(document, 'addEventListener');
+      initContentScript();
+      expect(spy).toHaveBeenCalledWith('visibilitychange', handleVisibilityChange);
+      spy.mockRestore();
     });
   });
 });
