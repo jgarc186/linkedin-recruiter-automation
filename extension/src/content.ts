@@ -256,6 +256,32 @@ export function onMessageListener(
 let observer: MutationObserver | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+export function cleanup(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+  chrome.runtime?.onMessage?.removeListener(onMessageListener);
+}
+
+export function handleVisibilityChange(): void {
+  if (document.hidden) {
+    observer?.disconnect();
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  } else {
+    const container = queryFirst(document, SELECTORS.container) || document.body;
+    observer?.observe(container, { childList: true, subtree: true });
+    detectNewMessages();
+  }
+}
+
 export function initContentScript(): void {
   // Initial scan
   detectNewMessages();
@@ -273,6 +299,8 @@ export function initContentScript(): void {
   observer.observe(container, { childList: true, subtree: true });
 
   chrome.runtime?.onMessage?.addListener(onMessageListener);
+  window.addEventListener('beforeunload', cleanup);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
 // Auto-initialize when injected as a content script
