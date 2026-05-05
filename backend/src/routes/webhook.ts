@@ -223,6 +223,11 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(500).send({ error: 'Internal server error' });
     }
   });
+
+  fastify.addHook('onClose', (_instance, done) => {
+    db.close();
+    done();
+  });
 };
 
 export { webhookRoutes };

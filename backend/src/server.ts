@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { webhookRoutes } from './routes/webhook.js';
@@ -63,6 +63,34 @@ export async function createApp() {
   return app;
 }
 
+export function registerShutdownHandlers(app: FastifyInstance, timeoutMs = 10_000): void {
+  let shuttingDown = false;
+
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info(`Received ${signal}, shutting down`);
+
+    const timer = setTimeout(() => {
+      app.log.error('Graceful shutdown timed out, forcing exit');
+      process.exit(1);
+    }, timeoutMs);
+    timer.unref();
+
+    try {
+      await app.close();
+      clearTimeout(timer);
+      process.exit(0);
+    } catch (err) {
+      app.log.error(err, 'Error during shutdown');
+      process.exit(1);
+    }
+  };
+
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
+}
+
 /* v8 ignore start */
 const start = async () => {
   try {
@@ -73,6 +101,7 @@ const start = async () => {
       host: config.host,
     });
     console.log(`Server running on http://${config.host}:${config.port}`);
+    registerShutdownHandlers(app);
   } catch (err) {
     console.error(err);
     process.exit(1);
