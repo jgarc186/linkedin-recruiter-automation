@@ -60,6 +60,7 @@ vi.mock('../src/db/database.js', () => ({
   initDatabase: vi.fn().mockReturnValue({
     prepare: vi.fn().mockReturnValue({ run: vi.fn(), get: vi.fn() }),
     exec: vi.fn(),
+    close: vi.fn(),
   }),
   saveMessage: vi.fn(),
   getMessage: vi.fn().mockReturnValue(null),
