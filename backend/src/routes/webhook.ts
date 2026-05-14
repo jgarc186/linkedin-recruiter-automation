@@ -5,7 +5,7 @@ import { sendApprovalRequest, handleCallbackQuery } from '../services/telegram.j
 import { analyzeRole, draftReply } from '../services/analyzer.js';
 import { scheduleMeeting, generateTimeSlots } from '../services/calendar.js';
 import { initDatabase, saveMessage, getMessage, updateMessageStatus, savePendingReply, getPendingReplies } from '../db/database.js';
-import type { MessageData, WebhookMessagePayload, WebhookReplyPayload, TelegramCallbackData } from '../../../shared/types.js';
+import type { MessageData, WebhookMessagePayload, WebhookReplyPayload } from '../../../shared/types.js';
 
 function timingSafeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);

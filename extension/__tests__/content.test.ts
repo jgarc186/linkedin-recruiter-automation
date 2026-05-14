@@ -10,7 +10,6 @@ import {
   onMessageListener,
   RECRUITER_KEYWORDS,
 } from '../src/content';
-import type { MessageData } from '../../shared/types';
 
 describe('content.ts', () => {
   beforeEach(() => {

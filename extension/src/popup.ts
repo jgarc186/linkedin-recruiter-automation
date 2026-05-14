@@ -52,5 +52,5 @@ export async function initPopup(): Promise<void> {
 }
 
 if (!import.meta.env.VITEST) {
-  initPopup();
+  void initPopup();
 }

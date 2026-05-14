@@ -109,7 +109,7 @@ const start = async () => {
 };
 
 if (process.env.NODE_ENV !== 'test') {
-  start();
+  void start();
 }
 /* v8 ignore end */
 

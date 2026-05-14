@@ -36,7 +36,7 @@ function etHourToUtc(date: Date, etHour: number): Date {
 export function generateTimeSlots(): string[] {
   const slots: string[] = [];
   const now = new Date();
-  let currentDate = new Date(now);
+  const currentDate = new Date(now);
 
   // Start from tomorrow
   currentDate.setDate(currentDate.getDate() + 1);

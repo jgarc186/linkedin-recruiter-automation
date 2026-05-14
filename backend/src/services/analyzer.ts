@@ -1,4 +1,4 @@
-import type { MessageData, AnalysisResult, UserCriteria } from '../../../shared/types.js';
+import type { MessageData, AnalysisResult } from '../../../shared/types.js';
 import { DEFAULT_CRITERIA } from '../../../shared/types.js';
 import { RECRUITER_KEYWORDS as BASE_KEYWORDS } from '../../../shared/constants.js';
 

@@ -4,7 +4,7 @@ import {
   draftReply,
   RECRUITER_KEYWORDS,
 } from '../src/services/analyzer.js';
-import type { MessageData, AnalysisResult } from '../../../shared/types.js';
+import type { MessageData } from '../../../shared/types.js';
 
 describe('analyzer.ts', () => {
   describe('RECRUITER_KEYWORDS', () => {
