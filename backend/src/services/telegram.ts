@@ -127,7 +127,7 @@ export async function handleCallbackQuery(
     }
 
     return callbackData;
-  } catch (error) {
+  } catch {
     throw new Error('Invalid callback data format');
   }
 }

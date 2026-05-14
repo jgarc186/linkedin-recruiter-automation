@@ -173,7 +173,7 @@ describe('security: Chrome storage overflow (background.ts)', () => {
 
   it('loadPendingSends falls back to empty array when storage.get throws', async () => {
     // processPendingSends calls loadPendingSends internally
-    const { localSet } = setupChrome({
+    setupChrome({
       localGet: vi.fn().mockRejectedValue(new Error('QUOTA_BYTES exceeded')),
       sessionGet: vi.fn().mockResolvedValue({ apiKey: 'test-key' }),
     });

@@ -10,9 +10,14 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint ."
   },
   "devDependencies": {
-    "turbo": "^2.0.0"
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "globals": "^15.0.0",
+    "turbo": "^2.0.0",
+    "typescript-eslint": "^8.0.0"
   }
 }

@@ -119,5 +119,5 @@ export async function initOptions(): Promise<void> {
 }
 
 if (!import.meta.env.VITEST) {
-  initOptions();
+  void initOptions();
 }

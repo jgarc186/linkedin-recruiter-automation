@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { config, validateConfig } from '../src/config.js';
 
 describe('config.ts', () => {

@@ -24,17 +24,17 @@ function markMissingApiKey(): void {
   }
 
   if (chrome.action) {
-    chrome.action.setBadgeText({ text: MISSING_API_KEY_BADGE_TEXT });
-    chrome.action.setBadgeBackgroundColor({ color: '#B91C1C' });
-    chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin: API key missing. Open options to set it.' });
+    void chrome.action.setBadgeText({ text: MISSING_API_KEY_BADGE_TEXT });
+    void chrome.action.setBadgeBackgroundColor({ color: '#B91C1C' });
+    void chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin: API key missing. Open options to set it.' });
   }
 }
 
 function clearMissingApiKeyState(): void {
   hasWarnedMissingApiKey = false;
   if (chrome.action) {
-    chrome.action.setBadgeText({ text: '' });
-    chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin' });
+    void chrome.action.setBadgeText({ text: '' });
+    void chrome.action.setTitle({ title: 'LinkedIn Recruiter Plugin' });
   }
 }
 
@@ -226,10 +226,10 @@ export async function pollPendingReplies(): Promise<void> {
 // Named listener functions for reliable MV3 registration
 function onAlarmHandler(alarm: chrome.alarms.Alarm): void {
   if (alarm.name === 'keepAlive') {
-    processPendingSends();
+    void processPendingSends();
   }
   if (alarm.name === 'pollReplies') {
-    pollPendingReplies();
+    void pollPendingReplies();
   }
 }
 
@@ -251,8 +251,8 @@ function onMessageHandler(
 export function maintainConnection(): void {
   // Use chrome.alarms for reliable MV3 keep-alive and polling
   if (chrome.alarms) {
-    chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
-    chrome.alarms.create('pollReplies', { periodInMinutes: 0.5 });
+    void chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
+    void chrome.alarms.create('pollReplies', { periodInMinutes: 0.5 });
   }
 }
 
