@@ -1,8 +1,20 @@
 {
-  "files": [],
-  "references": [
-    { "path": "shared" },
-    { "path": "backend" },
-    { "path": "extension" }
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "types": ["node", "chrome", "vite/client"]
+  },
+  "include": [
+    "shared/**/*.ts",
+    "backend/src/**/*.ts",
+    "extension/src/**/*.ts"
   ]
 }
