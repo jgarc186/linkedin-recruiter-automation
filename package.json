@@ -11,7 +11,8 @@
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --build --noEmit"
   },
   "devDependencies": {
     "eslint": "^9.0.0",
