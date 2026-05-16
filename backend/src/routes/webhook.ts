@@ -181,7 +181,7 @@ const webhookRoutes: FastifyPluginAsync = async (fastify) => {
         try {
           await scheduleMeeting(messageData.sender, suggestedTimes);
         } catch (calendarError) {
-          fastify.log.error('Failed to schedule calendar event:', calendarError);
+          fastify.log.error({ err: calendarError }, 'Failed to schedule calendar event');
         }
       }
 
