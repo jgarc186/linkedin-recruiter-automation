@@ -8,26 +8,51 @@ on:
 
 jobs:
   lint:
-    name: Lint
+    name: Lint & Type Check & Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run typecheck
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
   test:
-    name: Test
+    name: Build & Test (with coverage)
     runs-on: ubuntu-latest
+    env:
+      PORT: 8000
+      HOST: 127.0.0.1
+      EXTENSION_ID: test-extension-id
+      EXTENSION_API_KEY: ci-test-api-key
+      TELEGRAM_BOT_TOKEN: 123456789:test-token
+      TELEGRAM_USER_ID: "12345"
+      TELEGRAM_WEBHOOK_SECRET: ci-test-secret
+      GOOGLE_CLIENT_ID: test-client-id
+      GOOGLE_CLIENT_SECRET: test-client-secret
+      GOOGLE_REFRESH_TOKEN: test-refresh-token
+      DATABASE_PATH: ":memory:"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - run: npm ci
-      - run: npm test
+      - name: Install dependencies
+        run: npm ci
+      - name: Build all packages
+        run: npm run build
+      - name: Run tests with coverage
+        run: npm run test:coverage
