@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\ajfm88\\\\Desktop\\\\linkedin-recruiter-automation\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)"
     ]
   }
 }
