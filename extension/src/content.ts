@@ -304,6 +304,7 @@ export function initContentScript(): void {
 }
 
 // Auto-initialize when injected as a content script
+/* v8 ignore next 3 */
 if (!import.meta.env.VITEST) {
   initContentScript();
 }

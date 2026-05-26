@@ -51,6 +51,7 @@ export async function initPopup(): Promise<void> {
   if (pendingEl) pendingEl.textContent = String(pendingCount);
 }
 
+/* v8 ignore next 3 */
 if (!import.meta.env.VITEST) {
   void initPopup();
 }

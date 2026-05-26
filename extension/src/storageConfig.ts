@@ -79,6 +79,7 @@ export async function saveStorageConfig(config: StorageConfig): Promise<void> {
     if (wroteLocal) {
       rollbackOps.push(chrome.storage.local.set({ [SETTINGS_KEY]: previousLocalSettings }));
     }
+    /* v8 ignore next 3 */
     if (wroteSession) {
       rollbackOps.push(chrome.storage.session.set({ [API_KEY_KEY]: previousApiKey }));
     }

@@ -233,6 +233,20 @@ describe('content.ts - reply injection', () => {
 
       expect(() => sendReply('thread_1', 'text')).not.toThrow();
     });
+
+    it('should call setValue on React _valueTracker when present', () => {
+      document.body.innerHTML = `
+        <div class="msg-form__contenteditable" contenteditable="true" data-thread-id="thread_1"></div>
+      `;
+
+      const input = document.querySelector('.msg-form__contenteditable') as HTMLElement;
+      const mockSetValue = vi.fn();
+      (input as any)._valueTracker = { setValue: mockSetValue };
+
+      sendReply('thread_1', 'Hello');
+
+      expect(mockSetValue).toHaveBeenCalledWith('');
+    });
   });
 
   describe('onMessageListener', () => {

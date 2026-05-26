@@ -118,6 +118,7 @@ export async function initOptions(): Promise<void> {
   });
 }
 
+/* v8 ignore next 3 */
 if (!import.meta.env.VITEST) {
   void initOptions();
 }
