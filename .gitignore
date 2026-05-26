@@ -48,6 +48,12 @@ extension/*.zip
 # Backend build
 backend/dist/
 
+# Shared package generated files (produced by tsc --build)
+shared/.build/
+shared/.decl/
+shared/*.js
+shared/*.js.map
+
 # Temp files
 tmp/
 temp/

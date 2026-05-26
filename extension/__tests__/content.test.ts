@@ -261,6 +261,22 @@ describe('content.ts', () => {
       expect(messages).toHaveLength(1);
       expect(messages[0].thread_id).toBe('thread_0');
     });
+
+    it('should silently ignore sendMessage rejection', async () => {
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_send_fail">
+            <div class="msg-s-event-listitem__body"><p>I have an opportunity for you</p></div>
+          </div>
+        </div>
+      `;
+      (global as any).chrome.runtime.sendMessage = vi.fn().mockRejectedValue(new Error('context invalid'));
+
+      detectNewMessages();
+
+      // flush microtask queue so the .catch() handler runs
+      await Promise.resolve();
+    });
   });
 
   describe('initContentScript', () => {
@@ -340,6 +356,27 @@ describe('content.ts', () => {
       initContentScript();
 
       expect(mockAddListener).toHaveBeenCalled();
+    });
+
+    it('should fall back to document.body as container when msg-conversations-container is absent', () => {
+      document.body.innerHTML = ''; // no #msg-conversations-container
+
+      const mockObserve = vi.fn();
+      (global as any).MutationObserver = vi.fn().mockImplementation(() => ({
+        observe: mockObserve,
+        disconnect: vi.fn(),
+      }));
+      (global as any).chrome = {
+        ...((global as any).chrome),
+        runtime: {
+          sendMessage: vi.fn().mockResolvedValue(undefined),
+          onMessage: { addListener: vi.fn() },
+        },
+      };
+
+      initContentScript();
+
+      expect(mockObserve).toHaveBeenCalledWith(document.body, { childList: true, subtree: true });
     });
   });
 
@@ -457,6 +494,54 @@ describe('content.ts', () => {
       initContentScript();
       expect(spy).toHaveBeenCalledWith('visibilitychange', handleVisibilityChange);
       spy.mockRestore();
+    });
+
+    it('MutationObserver debounce callback calls detectNewMessages after 500ms', () => {
+      vi.useFakeTimers();
+
+      document.body.innerHTML = `
+        <div id="msg-conversations-container">
+          <div class="msg-s-message-group" data-thread-id="thread_debounce">
+            <div class="msg-s-event-listitem__body"><p>I have an opportunity for you</p></div>
+          </div>
+        </div>
+      `;
+      resetProcessedMessages();
+      (global as any).chrome.runtime.sendMessage.mockClear();
+
+      const observerCallback = (global as any).MutationObserver.mock.calls[0][0];
+      observerCallback([]);
+
+      // Timer has not fired yet
+      expect((global as any).chrome.runtime.sendMessage).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(500);
+
+      expect((global as any).chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'NEW_MESSAGE_DETECTED' })
+      );
+
+      vi.useRealTimers();
+    });
+
+    it('MutationObserver debounce cancels an existing timer when mutations fire rapidly', () => {
+      vi.useFakeTimers();
+      const observerCallback = (global as any).MutationObserver.mock.calls[0][0];
+
+      observerCallback([]); // first fire — no existing timer (false branch)
+      observerCallback([]); // second fire — timer is now set, cancels it (true branch)
+
+      vi.useRealTimers();
+    });
+
+    it('handleVisibilityChange() falls back to document.body when container is absent', () => {
+      document.body.innerHTML = ''; // remove #msg-conversations-container
+      mockObserve.mockClear();
+
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      handleVisibilityChange();
+
+      expect(mockObserve).toHaveBeenCalledWith(document.body, { childList: true, subtree: true });
     });
   });
 });

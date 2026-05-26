@@ -362,5 +362,133 @@ describe('options.ts', () => {
         expect(document.getElementById('save-status')!.textContent).toBe('Settings saved!');
       });
     });
+
+    it('should show error and not save on invalid webhook URL', async () => {
+      setupOptionsDOM();
+
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+      });
+
+      await initOptions();
+
+      // Use a completely malformed URL to exercise the catch branch in isValidWebhookUrl
+      (document.getElementById('webhook-url') as HTMLInputElement).value = 'not-a-url';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '200000';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        expect(document.getElementById('save-status')!.textContent).toBe(
+          'Invalid webhook URL. Must use http: or https:'
+        );
+      });
+      expect(localSet).not.toHaveBeenCalled();
+    });
+
+    it('should return early when form elements are missing from DOM', async () => {
+      document.body.innerHTML = '<div id="save-status"></div>'; // missing all form inputs
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+      });
+
+      await initOptions();
+
+      expect(consoleError).toHaveBeenCalledWith('Options form elements not found');
+      consoleError.mockRestore();
+    });
+
+    it('should show error and not save on negative compensation', async () => {
+      setupOptionsDOM();
+
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+      });
+
+      await initOptions();
+
+      (document.getElementById('webhook-url') as HTMLInputElement).value = '';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '-1';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        expect(document.getElementById('save-status')!.textContent).toBe('Invalid compensation value.');
+      });
+      expect(localSet).not.toHaveBeenCalled();
+    });
+
+    it('should accept and save an https webhook URL', async () => {
+      setupOptionsDOM();
+
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+        sessionSet,
+      });
+
+      await initOptions();
+
+      (document.getElementById('webhook-url') as HTMLInputElement).value = 'https://secure-server.com';
+      (document.getElementById('api-key') as HTMLInputElement).value = '';
+      (document.getElementById('min-seniority') as HTMLInputElement).value = 'senior';
+      (document.getElementById('preferred-tech') as HTMLInputElement).value = 'Go';
+      (document.getElementById('avoid-keywords') as HTMLInputElement).value = 'PHP';
+      (document.getElementById('locations') as HTMLInputElement).value = 'Remote';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '200000';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        expect(localSet).toHaveBeenCalledWith(
+          expect.objectContaining({
+            settings: expect.objectContaining({ webhookUrl: 'https://secure-server.com' }),
+          })
+        );
+      });
+    });
+
+    it('should use default webhook URL when input is empty', async () => {
+      setupOptionsDOM();
+
+      const localSet = vi.fn().mockResolvedValue(undefined);
+      const sessionSet = vi.fn().mockResolvedValue(undefined);
+      setupChromeStorageMocks({
+        localGet: vi.fn().mockResolvedValueOnce({}),
+        localSet,
+        sessionSet,
+      });
+
+      await initOptions();
+
+      (document.getElementById('webhook-url') as HTMLInputElement).value = '';
+      (document.getElementById('api-key') as HTMLInputElement).value = '';
+      (document.getElementById('min-seniority') as HTMLInputElement).value = 'senior';
+      (document.getElementById('preferred-tech') as HTMLInputElement).value = 'Go';
+      (document.getElementById('avoid-keywords') as HTMLInputElement).value = 'PHP';
+      (document.getElementById('locations') as HTMLInputElement).value = 'Remote';
+      (document.getElementById('min-compensation') as HTMLInputElement).value = '200000';
+
+      const form = document.getElementById('options-form') as HTMLFormElement;
+      form.dispatchEvent(new Event('submit'));
+
+      await vi.waitFor(() => {
+        expect(localSet).toHaveBeenCalledWith(
+          expect.objectContaining({
+            settings: expect.objectContaining({ webhookUrl: DEFAULT_SETTINGS.webhookUrl }),
+          })
+        );
+      });
+    });
   });
 });

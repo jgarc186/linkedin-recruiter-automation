@@ -25,7 +25,7 @@ jobs:
       - name: Type check
         run: npm run typecheck
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: npx audit-ci --config .audit-ci.json
 
   test:
     name: Build & Test (with coverage)

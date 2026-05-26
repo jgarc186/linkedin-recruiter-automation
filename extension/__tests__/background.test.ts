@@ -610,6 +610,110 @@ describe('background.ts', () => {
       expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('msg_boundary'));
       expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({ pending_sends: [] });
     });
+
+    it('should treat entry with undefined nextRetryAt as immediately retryable', async () => {
+      const pendingSends = [
+        {
+          id: 'send_undef',
+          data: { message_id: 'msg_u', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 0,
+          nextRetryAt: undefined,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({ ok: true });
+
+      await processPendingSends();
+
+      expect(mockFetch).toHaveBeenCalled();
+      expect((global as any).chrome.storage.local.set).toHaveBeenCalledWith({ pending_sends: [] });
+    });
+
+    it('should include criteria in payload when settings have criteria', async () => {
+      const criteria = { minSeniority: 'senior', preferredTechStack: ['Go'], avoidKeywords: [], locations: ['Remote'], minCompensation: 100000 };
+      const pendingSends = [
+        {
+          id: 'send_crit',
+          data: { message_id: 'msg_c', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 0,
+          nextRetryAt: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000', criteria } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({ ok: true });
+
+      await processPendingSends();
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.criteria).toEqual(criteria);
+    });
+
+    it('should requeue entry when fetch resolves with non-ok HTTP status', async () => {
+      const pendingSends = [
+        {
+          id: 'send_non_ok',
+          data: { message_id: 'msg_nok', thread_id: 't_1', sender: { name: 'A', title: 'B', company: 'C' }, content: 'test', timestamp: '2026-01-01' },
+          enqueuedAt: Date.now() - 1000,
+          attempts: 0,
+          nextRetryAt: 0,
+        },
+      ];
+
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn()
+              .mockResolvedValueOnce({ pending_sends: pendingSends })
+              .mockResolvedValueOnce({ settings: { webhookUrl: 'http://localhost:8000' } }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValueOnce({ apiKey: 'test-key' }),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+      await processPendingSends();
+
+      const savedQueue = (global as any).chrome.storage.local.set.mock.calls[0][0].pending_sends;
+      expect(savedQueue).toHaveLength(1);
+      expect(savedQueue[0].attempts).toBe(1);
+    });
   });
 
   describe('handleWebhookResponse', () => {
@@ -862,6 +966,27 @@ describe('background.ts', () => {
       maintainConnection();
 
       expect(mockAlarms.create).toHaveBeenCalledWith('pollReplies', { periodInMinutes: 0.5 });
+    });
+
+    it('should call pollPendingReplies on pollReplies alarm', async () => {
+      (global as any).chrome = {
+        storage: {
+          local: {
+            get: vi.fn().mockResolvedValue({}),
+            set: vi.fn().mockResolvedValue(undefined),
+          },
+          session: {
+            get: vi.fn().mockResolvedValue({}),
+          },
+        },
+      };
+      mockFetch.mockResolvedValueOnce({ ok: false });
+
+      __testOnAlarmHandler({ name: 'pollReplies' } as chrome.alarms.Alarm);
+
+      await vi.waitFor(() => {
+        expect((global as any).chrome.storage.local.get).toHaveBeenCalled();
+      });
     });
   });
 

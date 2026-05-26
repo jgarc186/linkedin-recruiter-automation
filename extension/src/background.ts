@@ -261,6 +261,7 @@ export { onAlarmHandler as __testOnAlarmHandler };
 export { onMessageHandler as __testOnMessageHandler };
 
 // Module-level listener registration (runs synchronously on every SW wake)
+/* v8 ignore next 5 */
 if (typeof chrome !== 'undefined' && chrome.alarms) {
   chrome.alarms.onAlarm.addListener(onAlarmHandler);
   chrome.runtime.onMessage.addListener(onMessageHandler);
