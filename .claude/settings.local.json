@@ -3,7 +3,15 @@
     "allow": [
       "WebSearch",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\ajfm88\\\\Desktop\\\\linkedin-recruiter-automation\" -Force)",
-      "Bash(Select-Object Name, PSIsContainer)"
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(gh run *)",
+      "Bash(npm audit *)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(npm ls *)",
+      "Bash(npm info *)",
+      "Bash(node -e \"const v=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(v.filter\\(x=>x.startsWith\\('0.6'\\)\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(npx audit-ci *)"
     ]
   }
 }

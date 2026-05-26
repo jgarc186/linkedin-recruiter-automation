@@ -12,7 +12,7 @@
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "lint": "eslint .",
-    "typecheck": "tsc -p shared/tsconfig.json --noEmit && tsc -p backend/tsconfig.check.json && tsc -p extension/tsconfig.check.json"
+    "typecheck": "tsc -p shared/tsconfig.json && tsc -p backend/tsconfig.check.json && tsc -p extension/tsconfig.check.json"
   },
   "devDependencies": {
     "eslint": "^9.0.0",
