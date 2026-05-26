@@ -11,7 +11,8 @@
       "Bash(npm ls *)",
       "Bash(npm info *)",
       "Bash(node -e \"const v=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(v.filter\\(x=>x.startsWith\\('0.6'\\)\\).join\\('\\\\n'\\)\\)\")",
-      "Bash(npx audit-ci *)"
+      "Bash(npx audit-ci *)",
+      "Bash(npx vitest *)"
     ]
   }
 }
